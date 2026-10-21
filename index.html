@@ -27,7 +27,19 @@
     .section-head h2 { margin: 0; }
     button { font: inherit; cursor: pointer; }
     button.text { border: none; background: transparent; color: #217290; font-weight: 600; font-size: 12px; }
-    .layer { display: flex; align-items: center; gap: 8px; padding: 10px 8px; border: 1px solid #e2ecf0; border-radius: 8px; margin-top: 8px; }
+    .layer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 8px; border: 1px solid #e2ecf0; border-radius: 8px; margin-top: 8px; background: #fff; }
+    .layer:has(.layer-menu:not([hidden])) { border-color: #b0ccd9; }
+    .layer-menu { flex-basis: 100%; min-width: 0; padding: 12px 10px 10px; margin-top: 1px; border-top: 1px solid #e2ecf0; background: #f7fbfc; border-radius: 0 0 6px 6px; }
+    .layer-menu[hidden] { display: none; }
+    .layer-menu label { display: block; font-weight: 700; color: #36566a; font-size: 11px; margin-bottom: 6px; }
+    .layer-menu select { display: block; width: 100%; border: 1px solid #b8d1dc; background: white; color: #17334b; border-radius: 5px; font: inherit; font-size: 12px; padding: 8px; cursor: pointer; }
+    .layer-menu select:focus-visible, .layer button:focus-visible, .layer-menu button:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    .ramp-preview { width: 100%; height: 14px; border: 1px solid #d2e0e7; border-radius: 4px; margin: 10px 0 5px; }
+    .ramp-caption { font-size: 10px; color: #6d8794; display: flex; justify-content: space-between; }
+    .layer-menu .invert { display: block; width: 100%; margin-top: 12px; text-align: center; font-size: 12px; padding: 9px 7px; background: #e7f2f6; color: #145671; font-weight: 650; }
+    .layer-menu .ramp-note { display: block; font-size: 10px; color: #7b909b; line-height: 1.4; margin-top: 7px; }
+    .layer .settings { font-size: 18px; line-height: 1; letter-spacing: 1px; padding: 3px 6px; font-weight: 700; }
+    .layer .settings[aria-expanded="true"] { background: #d7eaf1; }
     .layer input { accent-color: #207995; }
     .layer-name { min-width: 0; flex: 1; }
     .layer-name strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
@@ -53,7 +65,7 @@
 <body>
   <header>
     <strong>◉ SurveyLine</strong>
-    <span>Mini GIS · Version 0.1.1</span>
+    <span>Mini GIS · Version 0.1.2</span>
   </header>
   <div class="shell">
     <aside>
@@ -151,9 +163,9 @@
         bounds.getWest() >= -180 && bounds.getEast() <= 180;
     }
 
-    function registerLayer(name, kind, layer, bounds, visible = true) {
+    function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true) {
       const id = String(nextId++);
-      records.set(id, { name, kind, layer, bounds });
+      records.set(id, { name, kind, layer, bounds, rasterConfig });
       if (visible) layer.addTo(map);
       const item = document.createElement('div');
       item.className = 'layer';
@@ -161,10 +173,26 @@
       item.innerHTML = `
         <input class="visible" type="checkbox" checked aria-label="Toggle layer visibility">
         <div class="layer-name"><strong></strong><small></small></div>
+        <button class="settings" type="button" title="${rasterConfig ? 'Raster display settings' : 'Vector settings (coming soon)'}" aria-label="${rasterConfig ? 'Raster display settings' : 'Vector settings (coming soon)'}" aria-expanded="false">⋮</button>
         <button class="zoom" type="button" title="Zoom to layer" aria-label="Zoom to layer">◎</button>
-        <button class="remove" type="button" title="Remove layer" aria-label="Remove layer">×</button>`;
+        <button class="remove" type="button" title="Remove layer" aria-label="Remove layer">×</button>
+        ${rasterConfig ? `<div class="layer-menu" hidden>
+          <label>TIFF type
+            <select class="raster-type" aria-label="TIFF type for this raster">
+              <option value="none">None of these</option>
+              <option value="bathymetry">Bathymetry</option>
+              <option value="sidescan">Sidescan</option>
+              <option value="backscatter">Backscatter</option>
+            </select>
+          </label>
+          <div class="ramp-preview" aria-hidden="true"></div>
+          <div class="ramp-caption"><span class="ramp-left">Low</span><span class="ramp-right">High</span></div>
+          <button class="invert" type="button">Invert color ramp</button>
+          <span class="ramp-note"></span>
+        </div>` : ''}`;
       item.querySelector('strong').textContent = name;
       item.querySelector('small').textContent = kind;
+      if (rasterConfig) updateRasterMenu(item, rasterConfig);
       layersEl.prepend(item);
       empty.style.display = 'none';
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
@@ -199,6 +227,121 @@
       setStatus(`Loaded ${count} shapefile layer${count === 1 ? '' : 's'} from ${file.name}.`);
     }
 
+    // Single-band raster styles use the source's first band. For multiband images,
+    // "None" preserves RGB and sidescan/backscatter use perceived RGB brightness.
+    // Bathymetry is meaningful only when the first band contains actual elevations/depths.
+    const bathyStops = [
+      [0, [213, 38, 45]],       // Shallow: red
+      [0.2, [246, 137, 39]],
+      [0.4, [252, 226, 81]],
+      [0.6, [69, 185, 103]],
+      [0.8, [55, 183, 223]],
+      [1, [35, 65, 168]]       // Deep: blue
+    ];
+
+    function clamp01(value) { return Math.max(0, Math.min(1, value)); }
+    function clampByte(value) { return Math.round(clamp01(value / 255) * 255); }
+
+    function rainbowColor(fraction) {
+      const t = clamp01(fraction);
+      let i = 1;
+      while (i < bathyStops.length - 1 && t > bathyStops[i][0]) i++;
+      const [a, aRgb] = bathyStops[i - 1];
+      const [b, bRgb] = bathyStops[i];
+      const w = (t - a) / (b - a);
+      return `rgb(${aRgb.map((v, index) => Math.round(v + (bRgb[index] - v) * w)).join(',')})`;
+    }
+
+    function makeRasterColorFn(config) {
+      const { georaster, min, max, type, inverted } = config;
+      const isRgb = georaster.numberOfRasters >= 3;
+      const range = max - min || 1;
+      // Common bathymetric conventions: depth positive down, elevation negative down.
+      // When raster values include negatives, assume elevation (larger = shallower).
+      const valuesArePositiveDepths = min >= 0;
+      return values => {
+        if (!values || values[0] == null || !Number.isFinite(values[0])) return null;
+        const raw = values[0];
+        const bandFraction = clamp01((raw - min) / range);
+        const flip = fraction => inverted ? 1 - fraction : fraction;
+
+        if (type === 'bathymetry') {
+          // A pixel's shallow-to-deep position, regardless of the sign convention.
+          const deepFraction = valuesArePositiveDepths ? bandFraction : 1 - bandFraction;
+          return rainbowColor(flip(deepFraction));
+        }
+        if (type === 'sidescan' || type === 'backscatter') {
+          let brightness = bandFraction;
+          if (isRgb) {
+            const rgb = values.slice(0, 3);
+            if (rgb.some(v => v == null || !Number.isFinite(v))) return null;
+            brightness = clamp01((0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255);
+          }
+          const grey = Math.round(flip(brightness) * 255);
+          return `rgb(${grey},${grey},${grey})`;
+        }
+        if (isRgb) {
+          const rgb = values.slice(0, 3);
+          if (rgb.some(v => v == null || !Number.isFinite(v))) return null;
+          const channels = rgb.map(v => inverted ? 255 - clampByte(v) : clampByte(v));
+          return `rgb(${channels.join(',')})`;
+        }
+        // Original generic blue ramp, with optional inversion.
+        const t = flip(bandFraction);
+        return `rgb(${Math.round(18 + 192 * t)},${Math.round(80 + 155 * t)},${Math.round(138 + 100 * t)})`;
+      };
+    }
+
+    function updateRasterMenu(item, config) {
+      const menu = item.querySelector('.layer-menu');
+      if (!menu) return;
+      menu.querySelector('.raster-type').value = config.type;
+      menu.querySelector('.invert').textContent = config.inverted ? 'Restore original ramp' : 'Invert color ramp';
+      const preview = menu.querySelector('.ramp-preview');
+      const left = menu.querySelector('.ramp-left');
+      const right = menu.querySelector('.ramp-right');
+      const note = menu.querySelector('.ramp-note');
+      if (config.type === 'bathymetry') {
+        const stops = bathyStops.map(([position, rgb]) => `rgb(${rgb.join(',')}) ${Math.round(position * 100)}%`);
+        if (config.inverted) stops.reverse();
+        // A reversed gradient needs swapped positions, not reversed percentages.
+        const rainbow = config.inverted
+          ? bathyStops.map(([position], index) => {
+              const rgb = bathyStops[bathyStops.length - index - 1][1];
+              return `rgb(${rgb.join(',')}) ${Math.round(position * 100)}%`;
+            })
+          : stops;
+        preview.style.background = `linear-gradient(to right, ${rainbow.join(',')})`;
+        left.textContent = 'Shallow'; right.textContent = 'Deep';
+        note.textContent = config.min >= 0
+          ? 'Assumes positive water depths (smaller = shallower).'
+          : 'Assumes negative elevations (larger = shallower).';
+      } else if (config.type === 'sidescan' || config.type === 'backscatter') {
+        preview.style.background = config.inverted
+          ? 'linear-gradient(to right, white, black)'
+          : 'linear-gradient(to right, black, white)';
+        left.textContent = 'Low'; right.textContent = 'High';
+        note.textContent = 'Grayscale based on raster intensity.';
+      } else {
+        preview.style.background = config.georaster.numberOfRasters >= 3
+          ? (config.inverted ? 'linear-gradient(to right, #00ffff, #ff00ff, #ffff00)' : 'linear-gradient(to right, #ff0000, #00ff00, #0000ff)')
+          : (config.inverted ? 'linear-gradient(to right, #d2ebee, #12508a)' : 'linear-gradient(to right, #12508a, #d2ebee)');
+        left.textContent = 'Low'; right.textContent = 'High';
+        note.textContent = config.georaster.numberOfRasters >= 3
+          ? 'Original RGB image; inversion makes a color negative.'
+          : 'Original SurveyLine blue ramp.';
+      }
+    }
+
+    function applyRasterStyle(item, rec) {
+      if (!rec.rasterConfig) return;
+      const fn = makeRasterColorFn(rec.rasterConfig);
+      // GeoRasterLayer v4 exposes updateColors: recolor existing tiles without reimport.
+      if (typeof rec.layer.updateColors === 'function') rec.layer.updateColors(fn);
+      else { rec.layer.options.pixelValuesToColorFn = fn; rec.layer.redraw(); }
+      updateRasterMenu(item, rec.rasterConfig);
+    }
+
     async function addRaster(file) {
       if (typeof parseGeoraster !== 'function' || typeof GeoRasterLayer !== 'function') {
         throw new Error('Raster libraries did not load. Check your internet connection.');
@@ -214,25 +357,13 @@
       const maximum = Number(georaster.maxs?.[0]);
       const min = Number.isFinite(minimum) ? minimum : 0;
       const max = Number.isFinite(maximum) && maximum > min ? maximum : min + 1;
-      const isRGB = georaster.numberOfRasters >= 3;
-      const color = values => {
-        if (!values || values[0] == null || !Number.isFinite(values[0])) return null;
-        if (isRGB) {
-          const channels = values.slice(0, 3);
-          if (channels.some(v => v == null || !Number.isFinite(v))) return null;
-          return `rgb(${channels.map(v => Math.max(0, Math.min(255, Math.round(v)))).join(',')})`;
-        }
-        const fraction = Math.min(1, Math.max(0, (values[0] - min) / (max - min)));
-        const r = Math.round(18 + 192 * fraction);
-        const g = Math.round(80 + 155 * fraction);
-        const b = Math.round(138 + 100 * fraction);
-        return `rgb(${r},${g},${b})`;
-      };
-      const layer = new GeoRasterLayer({ georaster, opacity: 0.82, resolution: 128, pixelValuesToColorFn: color });
+      const rasterConfig = { georaster, min, max, type: 'none', inverted: false };
+      const layer = new GeoRasterLayer({ georaster, opacity: 0.82, resolution: 128,
+        pixelValuesToColorFn: makeRasterColorFn(rasterConfig) });
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error('Raster extent is invalid or its CRS is unsupported. Reproject to EPSG:4326 in QGIS.');
-      registerLayer(file.name, `Raster · EPSG:${String(georaster.projection).replace('EPSG:', '')}`, layer, bounds);
-      setStatus(`Loaded georeferenced raster ${file.name}.`);
+      registerLayer(file.name, `Raster · EPSG:${String(georaster.projection).replace('EPSG:', '')}`, layer, bounds, rasterConfig);
+      setStatus(`Loaded georeferenced raster ${file.name}. Use its ⋮ menu to choose a display type.`);
     }
 
     async function processFiles(fileList) {
@@ -271,27 +402,63 @@
       await processFiles(event.dataTransfer.files);
     });
 
+    function closeLayerMenus(exceptItem = null) {
+      layersEl.querySelectorAll('.layer').forEach(item => {
+        if (item === exceptItem) return;
+        const menu = item.querySelector('.layer-menu');
+        if (menu) menu.hidden = true;
+        item.querySelector('.settings')?.setAttribute('aria-expanded', 'false');
+      });
+    }
+
     layersEl.addEventListener('change', event => {
-      if (!event.target.classList.contains('visible')) return;
-      const rec = records.get(event.target.closest('.layer').dataset.id);
+      const item = event.target.closest('.layer');
+      const rec = item && records.get(item.dataset.id);
       if (!rec) return;
-      if (event.target.checked) rec.layer.addTo(map);
-      else map.removeLayer(rec.layer);
+      if (event.target.classList.contains('visible')) {
+        if (event.target.checked) rec.layer.addTo(map);
+        else map.removeLayer(rec.layer);
+      } else if (event.target.classList.contains('raster-type') && rec.rasterConfig) {
+        rec.rasterConfig.type = event.target.value;
+        applyRasterStyle(item, rec);
+        setStatus(`${rec.name}: ${event.target.selectedOptions[0].textContent} display applied.`);
+      }
     });
     layersEl.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
       const item = button.closest('.layer');
-      const id = item.dataset.id;
-      const rec = records.get(id);
+      if (!item) return;
+      const rec = records.get(item.dataset.id);
       if (!rec) return;
+      if (button.classList.contains('settings')) {
+        if (!rec.rasterConfig) return; // Vector settings will come in a later version.
+        const menu = item.querySelector('.layer-menu');
+        const opening = menu.hidden;
+        closeLayerMenus(item);
+        menu.hidden = !opening;
+        button.setAttribute('aria-expanded', String(opening));
+        return;
+      }
+      if (button.classList.contains('invert') && rec.rasterConfig) {
+        rec.rasterConfig.inverted = !rec.rasterConfig.inverted;
+        applyRasterStyle(item, rec);
+        setStatus(`${rec.name}: color ramp ${rec.rasterConfig.inverted ? 'inverted' : 'restored'}.`);
+        return;
+      }
       if (button.classList.contains('zoom')) map.fitBounds(rec.bounds.pad(0.12), { maxZoom: 15 });
       if (button.classList.contains('remove')) {
         map.removeLayer(rec.layer);
-        records.delete(id);
+        records.delete(item.dataset.id);
         item.remove();
         empty.style.display = records.size ? 'none' : 'block';
       }
+    });
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.layer-menu, .settings')) closeLayerMenus();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') closeLayerMenus();
     });
     document.getElementById('clearAll').addEventListener('click', () => {
       for (const rec of records.values()) map.removeLayer(rec.layer);
