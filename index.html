@@ -96,14 +96,12 @@
     .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: var(--sidebar-width) 9px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
     /* Draggable splitter: width is updated in CSS pixels; sidebar scroll remains independent. */
-    .sidebar-resizer { position: relative; z-index: 1001; min-width: 9px; background: #e9f1f4; border-left: 1px solid #d2e1e8; border-right: 1px solid #d2e1e8; cursor: col-resize; touch-action: none; user-select: none; }
-    .sidebar-resizer::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); height: 54px; width: 3px; border-radius: 4px; background: #94b4c3; }
-    .sidebar-resizer:hover, .sidebar-resizer:focus-visible, .sidebar-resizer.dragging { background: #d5e8f0; }
-    .sidebar-resizer:hover::after, .sidebar-resizer:focus-visible::after, .sidebar-resizer.dragging::after { background: #347995; }
+    /* Invisible drag handle: retains the nine-pixel resize hit target without the colored grip. */
+    .sidebar-resizer { position: relative; z-index: 1001; min-width: 9px; background: #f8fafb; border-left: 1px solid #eef2f4; border-right: 1px solid #eef2f4; cursor: col-resize; touch-action: none; user-select: none; }
+    .sidebar-resizer:hover, .sidebar-resizer:focus-visible, .sidebar-resizer.dragging { background: #edf1f4; }
     .sidebar-resizer:focus-visible { outline: 2px solid #347995; outline-offset: -2px; }
     body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
     aside { background: white; min-width: 0; padding: 22px; overflow-y: auto; border-right: 0; }
-    .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #618196; font-weight: 800; }
     h2 { font-size: 18px; margin: 8px 0 12px; }
     p { line-height: 1.5; color: #557083; font-size: 13px; }
     .upload { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 7px; padding: 24px 12px; border: 2px dashed #a7c3d1; border-radius: 12px; cursor: pointer; background: #f4fafc; color: #174f68; }
@@ -185,12 +183,11 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.5</span>
+      <span>Version 1.6.6</span>
     </div>
   </header>
   <div class="shell" id="appShell">
     <aside id="sidebar">
-      <div class="eyebrow">Workspace</div>
       <h2>Import your data</h2>
       <div class="help import-help">
         <p><b>Shapefile:</b> ZIP the .shp, .shx, .dbf and .prj files together. The .prj is essential for projected datasets.</p>
