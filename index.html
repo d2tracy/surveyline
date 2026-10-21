@@ -84,7 +84,7 @@
 <body>
   <header>
     <strong>◉ SurveyLine</strong>
-    <span>Mini GIS · Version 0.1.3</span>
+    <span>Mini GIS · Version 0.1.4</span>
   </header>
   <div class="shell">
     <aside>
@@ -422,8 +422,11 @@
       const limits = activeLimits(config);
       const positiveDepths = config.stretch.mono.low >= 0;
       const bathy = config.type === 'bathymetry';
-      const leftValue = bathy && !positiveDepths ? limits.high : limits.low;
-      const rightValue = bathy && !positiveDepths ? limits.low : limits.high;
+      // The legend endpoints must follow the displayed ramp, including inversion.
+      const normalLeftValue = bathy && !positiveDepths ? limits.high : limits.low;
+      const normalRightValue = bathy && !positiveDepths ? limits.low : limits.high;
+      const leftValue = config.inverted ? normalRightValue : normalLeftValue;
+      const rightValue = config.inverted ? normalLeftValue : normalRightValue;
       document.getElementById('legendName').textContent = rec.name;
       document.getElementById('legendName').title = rec.name;
       document.getElementById('legendKind').textContent = config.type;
@@ -479,15 +482,18 @@
       const right = menu.querySelector('.ramp-right');
       const note = menu.querySelector('.ramp-note');
       if (config.type === 'bathymetry') {
-        left.textContent = 'Shallow'; right.textContent = 'Deep';
+        left.textContent = config.inverted ? 'Deep' : 'Shallow';
+        right.textContent = config.inverted ? 'Shallow' : 'Deep';
         note.textContent = config.stretch.mono.low >= 0
           ? '2–98% stretch · assumes positive-down depths.'
           : '2–98% stretch · assumes negative elevations.';
       } else if (config.type === 'sidescan' || config.type === 'backscatter') {
-        left.textContent = 'Low'; right.textContent = 'High';
+        left.textContent = config.inverted ? 'High' : 'Low';
+        right.textContent = config.inverted ? 'Low' : 'High';
         note.textContent = '2–98% stretch · grayscale intensity.';
       } else {
-        left.textContent = 'Low'; right.textContent = 'High';
+        left.textContent = config.inverted ? 'High' : 'Low';
+        right.textContent = config.inverted ? 'Low' : 'High';
         note.textContent = 'Original TIFF display without percentile stretch.';
       }
     }
