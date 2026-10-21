@@ -31,6 +31,9 @@
     .survey-input-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 10px; }
     .survey-parameter-select, .survey-parameter-input { width: 100%; min-width: 0; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
     .survey-parameter-input::placeholder { color: #8399a5; }
+    .survey-name-field { margin-top: 18px; }
+    .survey-name-input { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
+    .survey-name-input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .survey-parameter-select:focus-visible, .survey-parameter-input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .survey-dialog .survey-hint { margin: 10px 0 0; font-size: 12px; }
     .survey-draw { display: block; width: 100%; margin-top: 23px; padding: 13px 16px; border: none; border-radius: 7px; background: #ee9854; color: #082b3f; font-weight: 750; font-size: 14px; }
@@ -40,13 +43,32 @@
     .planned-area { background: #f5f9fb; border: 1px solid #dce8ed; border-radius: 10px; padding: 12px; margin-top: 18px; }
     .planned-area .section-head h2 { font-size: 16px; }
     .planned-empty { color: #8296a2; font-size: 12px; padding: 5px 2px; }
-    .planned-item { display: flex; gap: 7px; align-items: center; border: 1px solid #dfe9ef; background: #fff; border-radius: 8px; padding: 9px 7px; margin-top: 8px; }
-    .planned-item input { accent-color: #de3d83; }
+    /* One plan row contains a collapsible list of individually selectable lines. */
+    .planned-item { border: 1px solid #dfe9ef; background: #fff; border-radius: 8px; margin-top: 8px; overflow: hidden; }
+    .planned-header { display: flex; gap: 6px; align-items: center; padding: 8px 6px; }
+    .planned-header input { accent-color: #de3d83; margin: 0 2px; }
     .planned-item-info { min-width: 0; flex: 1; }
-    .planned-item-info strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .planned-item-info small { display: block; font-size: 10px; color: #6d8997; line-height: 1.4; margin-top: 2px; }
-    .planned-item button { border: 0; border-radius: 5px; background: #eaf3f6; color: #2a657a; padding: 5px 7px; }
-    .planned-item button:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    .planned-name { display: block; border: 0; padding: 0; background: transparent; text-align: left; width: 100%; color: #17334b; font-size: 12px; font-weight: 750; overflow-wrap: anywhere; }
+    .planned-item button:focus-visible, .planned-line-row input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    .planned-item .planned-expand, .planned-item .planned-zoom, .planned-item .planned-remove { border: 0; border-radius: 5px; background: #eaf3f6; color: #2a657a; padding: 5px 6px; flex-shrink: 0; }
+    .planned-item .planned-expand { width: 23px; padding: 4px 2px; font-size: 14px; }
+    .planned-item .planned-expand[aria-expanded="true"] { background: #d8eaf2; }
+    .planned-details { border-top: 1px solid #e2ecf0; background: #f9fcfd; padding: 10px 7px; }
+    .planned-details[hidden] { display: none; }
+    .planned-summary { font-size: 10px; color: #678393; line-height: 1.5; margin: 0 0 9px; }
+    .planned-selection-tools { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 8px; }
+    .planned-selected-count { color: #5c798a; font-size: 10px; }
+    .planned-item .planned-delete-selected { border: 0; border-radius: 5px; padding: 6px 8px; background: #fce9ed; color: #a32950; font-size: 11px; font-weight: 700; }
+    .planned-item .planned-delete-selected:not(:disabled):hover { background: #f7d7df; }
+    .planned-item .planned-delete-selected:disabled { background: #edf2f5; color: #8fa3ad; cursor: not-allowed; }
+    .planned-line-list { max-height: 210px; overflow-y: auto; border: 1px solid #e2ecf0; border-radius: 6px; background: white; }
+    .planned-line-row { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 7px 9px; font-size: 12px; color: #315369; border-bottom: 1px solid #edf3f6; }
+    .planned-line-row:last-child { border-bottom: 0; }
+    .planned-line-row:hover { background: #f2f7fa; }
+    .planned-line-row.selected { background: #fff0c8; color: #704819; font-weight: 700; }
+    .planned-line-row input { accent-color: #d98c22; margin: 0; flex-shrink: 0; }
+    .planned-line-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .planned-line-length { font-size: 10px; color: #839ba7; margin-left: auto; white-space: nowrap; }
 
     .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
@@ -128,7 +150,7 @@
   <header>
     <strong>◉ SurveyLine</strong>
     <div class="header-actions">
-      <span>Mini GIS · Version 1.6.2</span>
+      <span>Mini GIS · Version 1.6.3</span>
     </div>
   </header>
   <div class="shell">
@@ -191,6 +213,10 @@
         <option value="">Select a shapefile…</option>
       </select>
       <p class="survey-hint" id="surveyAreaHint" hidden>No shapefiles loaded. Upload a zipped shapefile to select a survey area.</p>
+      <div class="survey-name-field">
+        <label for="linePlanName">Line Plan Name</label>
+        <input id="linePlanName" class="survey-name-input" type="text" value="Line Plan" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Line Plan">
+      </div>
       <div class="survey-parameters" aria-label="Survey parameters">
         <div class="survey-field">
           <label for="swathWidthMode">Swath Width</label>
@@ -306,6 +332,7 @@
     const closeSurveyModalBtn = document.getElementById('closeSurveyModal');
     const drawSurveyBtn = document.getElementById('drawSurveyLines');
     const surveyErrorEl = document.getElementById('surveyError');
+    const linePlanNameEl = document.getElementById('linePlanName');
     const plannedLinesEl = document.getElementById('plannedLines');
     const plannedEmpty = document.getElementById('plannedEmpty');
     const plannedRecords = new Map();
@@ -607,7 +634,7 @@
             }
             coordinates.push(lonLat);
           }
-          features.push({ type: 'Feature', properties: { line: i + 1, heading_deg: bearingDegrees, spacing_m: spacing },
+          features.push({ type: 'Feature', properties: { line: i + 1, heading_deg: bearingDegrees, spacing_m: spacing, length_m: v1 - v0 },
             geometry: { type: 'LineString', coordinates } });
           totalMeters += v1 - v0;
           if (features.length > 10000) throw new Error('This survey produces too many separate line segments. Increase spacing or simplify the polygon.');
@@ -620,30 +647,130 @@
 
     function updatePlannedEmpty() { plannedEmpty.hidden = plannedRecords.size > 0; }
 
-    function registerSurveyPlan(sourceName, result, spacing, bearingDegrees) {
+    const normalPlanStyle = { color: '#f02e91', weight: 3.5, opacity: 1, lineCap: 'round' };
+    const selectedPlanStyle = { color: '#ffb020', weight: 6, opacity: 1, lineCap: 'round' };
+
+    function refreshPlanSummary(record) {
+      const lines = Array.from(record.lines.values());
+      const passes = new Set(lines.map(line => line.passNumber)).size;
+      const totalMeters = lines.reduce((sum, line) => sum + line.lengthMeters, 0);
+      record.details.querySelector('.planned-summary').textContent =
+        `${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
+      record.element.querySelector('.planned-name').title = `${record.name} (${record.sourceName})`;
+    }
+
+    function refreshPlanSelection(record) {
+      const count = Array.from(record.lines.values()).filter(line => line.selected).length;
+      const button = record.details.querySelector('.planned-delete-selected');
+      button.disabled = count === 0;
+      button.textContent = `Delete selected${count ? ` (${count})` : ''}`;
+      record.details.querySelector('.planned-selected-count').textContent =
+        count ? `${count} selected` : `${record.lines.size} lines`;
+    }
+
+    function setSurveyLineSelected(record, line, selected) {
+      line.selected = selected;
+      line.layer.setStyle(selected ? selectedPlanStyle : normalPlanStyle);
+      if (selected && record.layer.hasLayer(line.layer) && map.hasLayer(record.layer)) line.layer.bringToFront();
+      line.row.classList.toggle('selected', selected);
+      line.row.querySelector('.planned-line-check').checked = selected;
+      refreshPlanSelection(record);
+    }
+
+    function toggleSurveyLineSelected(planId, lineId) {
+      const record = plannedRecords.get(planId);
+      const line = record?.lines.get(lineId);
+      if (!line) return;
+      setSurveyLineSelected(record, line, !line.selected);
+    }
+
+    function removeSurveyPlan(id) {
+      const record = plannedRecords.get(id);
+      if (!record) return;
+      map.removeLayer(record.layer);
+      record.element.remove();
+      plannedRecords.delete(id);
+      updatePlannedEmpty();
+    }
+
+    function removeSelectedSurveyLines(record) {
+      for (const [id, line] of record.lines) {
+        if (!line.selected) continue;
+        record.layer.removeLayer(line.layer);
+        line.row.remove();
+        record.lines.delete(id);
+      }
+      if (record.lines.size === 0) {
+        // Remove the empty plan as well; no invisible zero-line plans remain.
+        removeSurveyPlan(record.id);
+        return;
+      }
+      record.bounds = record.layer.getBounds();
+      refreshPlanSummary(record);
+      refreshPlanSelection(record);
+    }
+
+    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees) {
       const planNumber = nextPlanId++;
       const id = String(planNumber);
+      const lineEntries = new Map();
+      let lineSequence = 0;
       const layer = L.geoJSON(result.geojson, {
-        style: { color: '#f02e91', weight: 3.5, opacity: 1, lineCap: 'round' },
+        style: normalPlanStyle,
         onEachFeature(feature, surveyLine) {
-          surveyLine.bindTooltip(`Line ${feature.properties.line} · ${spacing} m spacing`);
+          const sequence = ++lineSequence;
+          const lineId = String(sequence);
+          const lineName = `Line ${String(sequence).padStart(3, '0')}`;
+          const lengthMeters = feature.properties.length_m;
+          surveyLine.bindTooltip(`${lineName} · ${spacing} m spacing`);
+          surveyLine.on('click', () => toggleSurveyLineSelected(id, lineId));
+          lineEntries.set(lineId, { id: lineId, name: lineName,
+            passNumber: feature.properties.line, lengthMeters, layer: surveyLine,
+            selected: false, row: null });
         }
       });
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error('The planned lines have invalid coordinates.');
-      plannedRecords.set(id, { layer, bounds, sourceName });
-      layer.addTo(map);
-      const item = document.createElement('div');
+      const item = document.createElement('section');
       item.className = 'planned-item';
       item.dataset.planId = id;
-      item.innerHTML = '<input class="planned-visible" type="checkbox" checked aria-label="Show or hide planned survey lines">' +
-        '<div class="planned-item-info"><strong></strong><small></small></div>' +
-        '<button type="button" class="planned-zoom" title="Zoom to plan" aria-label="Zoom to plan">◎</button>' +
-        '<button type="button" class="planned-remove" title="Remove plan" aria-label="Remove plan">×</button>';
-      item.querySelector('strong').textContent = `Survey Plan ${planNumber} · ${sourceName}`;
-      item.querySelector('small').textContent =
-        `${result.lineCount} passes · ${result.segmentCount} segments · ${spacing} m · ${bearingDegrees}° · ${(result.totalMeters / 1000).toFixed(2)} km`;
+      item.innerHTML = `
+        <div class="planned-header">
+          <button type="button" class="planned-expand" title="Expand lines" aria-label="Expand lines" aria-expanded="false">▸</button>
+          <input class="planned-visible" type="checkbox" checked aria-label="Show or hide this survey plan">
+          <div class="planned-item-info"><button class="planned-name" type="button"></button></div>
+          <button type="button" class="planned-zoom" title="Zoom to plan" aria-label="Zoom to plan">◎</button>
+          <button type="button" class="planned-remove" title="Remove plan" aria-label="Remove plan">×</button>
+        </div>
+        <div class="planned-details" hidden>
+          <p class="planned-summary"></p>
+          <div class="planned-selection-tools">
+            <span class="planned-selected-count"></span>
+            <button type="button" class="planned-delete-selected" disabled>Delete selected</button>
+          </div>
+          <div class="planned-line-list" role="group" aria-label="Lines in this plan"></div>
+        </div>`;
+      item.querySelector('.planned-name').textContent = name;
+      const details = item.querySelector('.planned-details');
+      const lineList = details.querySelector('.planned-line-list');
+      for (const line of lineEntries.values()) {
+        const row = document.createElement('label');
+        row.className = 'planned-line-row';
+        row.dataset.lineId = line.id;
+        row.innerHTML = '<input type="checkbox" class="planned-line-check"><span class="planned-line-label"></span><span class="planned-line-length"></span>';
+        row.querySelector('input').setAttribute('aria-label', `Highlight ${line.name}`);
+        row.querySelector('.planned-line-label').textContent = line.name;
+        row.querySelector('.planned-line-length').textContent = `${Math.round(line.lengthMeters)} m`;
+        line.row = row;
+        lineList.append(row);
+      }
+      const record = { id, name, sourceName, spacing, bearing: bearingDegrees,
+        layer, bounds, lines: lineEntries, element: item, details };
+      plannedRecords.set(id, record);
       plannedLinesEl.append(item);
+      refreshPlanSummary(record);
+      refreshPlanSelection(record);
+      layer.addTo(map);
       updatePlannedEmpty();
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
     }
@@ -659,8 +786,9 @@
         const bearing = orientationInput.value.trim() === '' ? NaN : Number(orientationInput.value);
         if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Enter a line spacing greater than zero, in metres.');
         if (!Number.isFinite(bearing) || bearing < 0 || bearing >= 360) throw new Error('Enter a line orientation from 0° to less than 360° (clockwise from North).');
+        const planName = linePlanNameEl.value.trim().slice(0, 80) || 'Line Plan';
         const result = generateSurveyGeometry(record.sourceData, spacing, bearing);
-        registerSurveyPlan(record.name, result, spacing, bearing);
+        registerSurveyPlan(record.name, planName, result, spacing, bearing);
         closeSurveyModal();
       } catch (err) {
         surveyErrorEl.textContent = err.message || 'Unable to draw survey lines.';
@@ -670,32 +798,42 @@
     }
     drawSurveyBtn.addEventListener('click', drawSurveyLines);
     plannedLinesEl.addEventListener('change', event => {
-      if (!event.target.classList.contains('planned-visible')) return;
-      const record = plannedRecords.get(event.target.closest('.planned-item')?.dataset.planId);
+      const item = event.target.closest('.planned-item');
+      const record = plannedRecords.get(item?.dataset.planId);
       if (!record) return;
-      if (event.target.checked) record.layer.addTo(map);
-      else map.removeLayer(record.layer);
+      if (event.target.classList.contains('planned-visible')) {
+        if (event.target.checked) record.layer.addTo(map);
+        else map.removeLayer(record.layer);
+      }
+      if (event.target.classList.contains('planned-line-check')) {
+        const line = record.lines.get(event.target.closest('.planned-line-row')?.dataset.lineId);
+        if (line) setSurveyLineSelected(record, line, event.target.checked);
+      }
     });
     plannedLinesEl.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
       const item = button.closest('.planned-item');
-      const id = item?.dataset.planId;
-      const record = plannedRecords.get(id);
+      const record = plannedRecords.get(item?.dataset.planId);
       if (!record) return;
-      if (button.classList.contains('planned-zoom')) map.fitBounds(record.bounds.pad(0.12), { maxZoom: 15 });
-      if (button.classList.contains('planned-remove')) {
-        map.removeLayer(record.layer);
-        plannedRecords.delete(id);
-        item.remove();
-        updatePlannedEmpty();
+      if (button.classList.contains('planned-expand') || button.classList.contains('planned-name')) {
+        const expand = item.querySelector('.planned-expand');
+        const next = expand.getAttribute('aria-expanded') !== 'true';
+        expand.setAttribute('aria-expanded', String(next));
+        expand.title = next ? 'Collapse lines' : 'Expand lines';
+        expand.textContent = next ? '▾' : '▸';
+        expand.setAttribute('aria-label', next ? 'Collapse lines' : 'Expand lines');
+        record.details.hidden = !next;
+      } else if (button.classList.contains('planned-zoom')) {
+        map.fitBounds(record.bounds.pad(0.12), { maxZoom: 15 });
+      } else if (button.classList.contains('planned-remove')) {
+        removeSurveyPlan(record.id);
+      } else if (button.classList.contains('planned-delete-selected')) {
+        removeSelectedSurveyLines(record);
       }
     });
     document.getElementById('clearPlanned').addEventListener('click', () => {
-      for (const record of plannedRecords.values()) map.removeLayer(record.layer);
-      plannedRecords.clear();
-      plannedLinesEl.replaceChildren();
-      updatePlannedEmpty();
+      for (const id of Array.from(plannedRecords.keys())) removeSurveyPlan(id);
     });
     // --- End survey-line generation ---------------------------------------------
 
