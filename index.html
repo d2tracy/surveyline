@@ -128,7 +128,7 @@
   <header>
     <strong>◉ SurveyLine</strong>
     <div class="header-actions">
-      <span>Mini GIS · Version 1.6</span>
+      <span>Mini GIS · Version 1.6.1</span>
     </div>
   </header>
   <div class="shell">
@@ -368,7 +368,7 @@
     // --- Survey-line generation -------------------------------------------------
     // Compass bearings in degrees clockwise from true North (0=N/S, 90=E/W).
     // GeoJSON is WGS84, but spacing/intersections must be computed in metres.
-    // proj4 is already loaded for GeoTIFF support; use a local azimuthal-equidistant
+    // proj4 is already loaded for GeoTIFF support; use a local metre-based
     // tangent plane centered on the selected survey area.
     function collectSurveyPolygons(sourceData) {
       const polygons = [];
@@ -385,6 +385,41 @@
       return polygons;
     }
 
+    // Pure JavaScript WGS84 local projection fallback for small survey areas.
+    // This is not a general replacement for a full GIS projection engine.
+    function localWGS84TangentProjection(centerLon, centerLat) {
+      const rad = Math.PI / 180, deg = 180 / Math.PI;
+      const a = 6378137, f = 1 / 298.257223563, e2 = f * (2 - f);
+      const e4 = e2 * e2, e6 = e4 * e2;
+      const phi0 = centerLat * rad, lam0 = centerLon * rad;
+      function arc(phi) {
+        return a * ((1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256) * phi
+          - (3 * e2 / 8 + 3 * e4 / 32 + 45 * e6 / 1024) * Math.sin(2 * phi)
+          + (15 * e4 / 256 + 45 * e6 / 1024) * Math.sin(4 * phi)
+          - (35 * e6 / 3072) * Math.sin(6 * phi));
+      }
+      function northRadius(phi) {
+        const q = 1 - e2 * Math.sin(phi) ** 2;
+        return a * (1 - e2) / (q ** 1.5);
+      }
+      function eastRadius(phi) {
+        const q = 1 - e2 * Math.sin(phi) ** 2;
+        return a * Math.cos(phi) / Math.sqrt(q);
+      }
+      const originArc = arc(phi0);
+      return {
+        forward: ([lon, lat]) => {
+          const phi = lat * rad;
+          return [(lon * rad - lam0) * eastRadius(phi), arc(phi) - originArc];
+        },
+        inverse: ([x, y]) => {
+          let phi = phi0 + y / northRadius(phi0);
+          for (let i = 0; i < 5; i++) phi -= (arc(phi) - originArc - y) / northRadius(phi);
+          return [(lam0 + x / eastRadius(phi)) * deg, phi * deg];
+        }
+      };
+    }
+
     function projectedSurveyPolygons(sourceData) {
       const geoPolygons = collectSurveyPolygons(sourceData);
       const positions = geoPolygons.flatMap(polygon => polygon.flatMap(ring => ring));
@@ -399,16 +434,59 @@
       const minLat = lats.reduce((a, b) => Math.min(a, b), Infinity);
       const maxLat = lats.reduce((a, b) => Math.max(a, b), -Infinity);
       if (maxLon - minLon > 180) throw new Error('Survey areas crossing the international date line are not supported yet.');
-      if (typeof proj4 !== 'function') throw new Error('Projection library unavailable. Check your internet connection.');
       const centerLon = (minLon + maxLon) / 2;
       const centerLat = (minLat + maxLat) / 2;
-      const projection = proj4(`+proj=aeqd +lat_0=${centerLat} +lon_0=${centerLon} +datum=WGS84 +units=m +no_defs`);
+      // Projected metres, not longitude/latitude degrees. A centered transverse
+      // Mercator is stable for compact survey sites, keeps local scale near 1,
+      // and makes grid north virtually equal to true north at the survey center.
+      // Some versions of proj4js return NaN from custom AEQD definitions; that
+      // must not prevent otherwise valid WGS84 polygons from being planned.
+      const defs = [
+        `+proj=tmerc +lat_0=${centerLat} +lon_0=${centerLon} +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs`
+      ];
+      if (centerLat > -80 && centerLat < 84) {
+        const zone = Math.min(60, Math.max(1, Math.floor((centerLon + 180) / 6) + 1));
+        defs.push(`+proj=utm +zone=${zone} ${centerLat < 0 ? '+south ' : ''}+datum=WGS84 +units=m +no_defs`);
+      }
+      let projection = null;
+      if (typeof proj4 === 'function') {
+        for (const definition of defs) {
+          try {
+            const candidate = proj4('EPSG:4326', definition);
+            // Verify forward and inverse transforms using actual polygon vertices.
+            const samples = [positions[0], positions[Math.floor(positions.length / 2)], positions[positions.length - 1]];
+            if (samples.every(([lon, lat]) => {
+              const xy = candidate.forward([lon, lat]);
+              if (!Array.isArray(xy) || !xy.every(Number.isFinite)) return false;
+              const ll = candidate.inverse(xy);
+              return Array.isArray(ll) && ll.every(Number.isFinite) &&
+                Math.abs(ll[0] - lon) < 1e-6 && Math.abs(ll[1] - lat) < 1e-6;
+            })) { projection = candidate; break; }
+          } catch (error) {
+            console.warn('Survey projection candidate unavailable:', error);
+          }
+        }
+      }
+      if (!projection) {
+        // Small-area WGS84 tangent-plane fallback: uses ellipsoidal radii of
+        // curvature and the WGS84 meridional arc. Accurate for compact surveys
+        // and independent of browser-side projection library implementations.
+        // Refuse a large survey rather than silently introducing distortion.
+        const approximateHeight = (maxLat - minLat) * 111300;
+        const approximateWidth = (maxLon - minLon) * 111300 * Math.cos(centerLat * Math.PI / 180);
+        if (Math.max(approximateHeight, approximateWidth) > 20000) {
+          throw new Error('Unable to initialize the metre projection for this large survey area. Reload the page and check the projection library.');
+        }
+        projection = localWGS84TangentProjection(centerLon, centerLat);
+        console.warn('SurveyLine: using the WGS84 local tangent-plane fallback for metre coordinates.');
+      }
       const projected = geoPolygons.map(polygon => polygon.map(ring => {
         if (!Array.isArray(ring) || ring.length < 4) throw new Error('Invalid polygon ring in the selected shapefile.');
         return ring.map(point => projection.forward([point[0], point[1]]));
       }));
-      if (projected.flat(2).some(point => !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) {
-        throw new Error('Could not project survey polygon into local metre coordinates.');
+      if (projected.flat(2).some(point => !Array.isArray(point) ||
+          !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) {
+        throw new Error('Survey polygon projection failed. Check your shapefile geometries and CRS.');
       }
       return { projected, projection };
     }
