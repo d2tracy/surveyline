@@ -68,6 +68,8 @@
     .depth-result[hidden] { display: none; }
     .depth-calculate { margin-top: 0; overflow-wrap: anywhere; }
     .depth-calculate:disabled { background: #dfe9ee; color: #738e9c; cursor: not-allowed; }
+    .depth-calculate.is-complete { background: #fff; color: #a65319; border: 2px solid #ee9854; }
+    .depth-calculate.is-complete:hover:not(:disabled) { background: #fff8f1; }
     .depth-warning { margin: 12px 0 0; color: #657d8d; line-height: 1.5; font-size: 11px; }
     .depth-apply { margin-top: 10px; }
     .depth-apply[hidden] { display: none; }
@@ -218,7 +220,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.9</span>
+      <span>Version 1.6.10</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -616,7 +618,7 @@
       const overlap = readOptionalNumber(swathOverlapValueEl);
       calculatedSpacingMetres = width > 0 && Number.isFinite(overlap) && overlap >= 0 && overlap < 100
         ? width * (1 - overlap / 100) : NaN;
-      if (lineSpacingModeEl.value === 'swath') lineSpacingValueEl.value = displayMetres(calculatedSpacingMetres);
+      if (lineSpacingModeEl.value === 'swath') lineSpacingValueEl.value = Number.isFinite(calculatedSpacingMetres) && calculatedSpacingMetres > 0 ? String(Math.round(calculatedSpacingMetres)) : '';
     }
     function updateSpacingMode() {
       const calculate = lineSpacingModeEl.value === 'swath';
@@ -701,6 +703,7 @@
       pendingCalculatedDepth = NaN;
       applyCalculatedDepthBtn.hidden = true;
       applyCalculatedDepthBtn.textContent = 'Input water depth';
+      calculateDepthFromRasterBtn.classList.remove('is-complete');
     }
     function updateDepthSource() {
       const active = activeBathymetryLayer();
@@ -866,6 +869,7 @@
         pendingCalculatedDepth = depth;
         applyCalculatedDepthBtn.textContent = `Input water depth (${depth.toFixed(3)} m)`;
         applyCalculatedDepthBtn.hidden = false;
+        calculateDepthFromRasterBtn.classList.add('is-complete');
         showDepthResult(`Mean raster value: ${stats.mean.toFixed(3)} m. Calculated water depth: ${depth.toFixed(3)} m from ${stats.count.toLocaleString()} valid cell centres.${stats.invalid ? ` ${stats.invalid.toLocaleString()} NoData/invalid cells excluded.` : ''}`);
       } catch (error) {
         showDepthResult(error.message || 'Bathymetry mean calculation failed.', true);
