@@ -236,7 +236,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.12</span>
+      <span>Version 1.6.13</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1714,13 +1714,23 @@
     // rendering order rather than a screen screenshot with dialogs and controls.
     // Visible GeoRasterLayer canvases and planned vector paths are both included.
     async function visibleMapCanvas() {
+      // Sync Leaflet with the actual (possibly user-resized) map viewport before
+      // measuring either the image positions or the export's geographic bounds.
+      map.invalidateSize({ pan: false, animate: false });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const mapElement = map.getContainer();
       const rect = mapElement.getBoundingClientRect();
       const width = Math.round(rect.width), height = Math.round(rect.height);
       if (!(width > 0 && height > 0) || width * height > 16000000) {
         throw new Error('Map is too large or not visible; resize the browser and retry.');
       }
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const mapSize = map.getSize();
+      if (Math.abs(mapSize.x - width) > 1 || Math.abs(mapSize.y - height) > 1) {
+        throw new Error('Map dimensions are still updating; retry the GeoTIFF export.');
+      }
+      const projectedCorner = (x, y) => map.options.crs.project(map.containerPointToLatLng([x, y]));
+      const projectedTopLeft = projectedCorner(0, 0);
+      const projectedLowerRight = projectedCorner(width, height);
       const canvas = document.createElement('canvas');
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -1758,6 +1768,19 @@
             // Leaflet vectors store style and geometry on SVG paths. Serialize
             // them to keep stroke/fill and pan/zoom transforms together.
             const svg = element.cloneNode(true);
+            // Leaflet's SVG renderer extends its canvas by 10% beyond the map
+            // on each side. It positions that SVG with an inline CSS transform.
+            // getBoundingClientRect() above ALREADY includes this translation.
+            // When serialized as an <img>, retaining the original transform
+            // applies the 10% offset AGAIN (the exact offset in the user's TIFF).
+            // Strip positioning only from the cloned root, preserving its
+            // viewBox and all child path geometry, styles and transforms.
+            svg.style.removeProperty('transform');
+            svg.style.removeProperty('-webkit-transform');
+            svg.style.removeProperty('transform-origin');
+            svg.style.removeProperty('left');
+            svg.style.removeProperty('top');
+            svg.style.removeProperty('position');
             svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
             const data = new XMLSerializer().serializeToString(svg);
             const svgUrl = URL.createObjectURL(new Blob([data], { type: 'image/svg+xml' }));
@@ -1784,7 +1807,20 @@
       // Fail clearly if any third-party imagery prevented safe pixel access.
       try { ctx.getImageData(0, 0, 1, 1); }
       catch (_) { throw new Error('A map tile blocks pixel export (CORS). Use a basemap that permits image capture, then retry.'); }
-      return canvas;
+      // Disallow inconsistent exports if the user resizes or the map moves
+      // while asynchronous SVG rasterization is running.
+      const currentRect = mapElement.getBoundingClientRect();
+      const currentTopLeft = projectedCorner(0, 0);
+      const currentLowerRight = projectedCorner(width, height);
+      const metresPerPixel = Math.abs((projectedLowerRight.x - projectedTopLeft.x) / width);
+      const changed = Math.abs(currentRect.width - rect.width) > 1 ||
+        Math.abs(currentRect.height - rect.height) > 1 ||
+        Math.abs(currentTopLeft.x - projectedTopLeft.x) > metresPerPixel * 0.5 ||
+        Math.abs(currentTopLeft.y - projectedTopLeft.y) > metresPerPixel * 0.5 ||
+        Math.abs(currentLowerRight.x - projectedLowerRight.x) > metresPerPixel * 0.5 ||
+        Math.abs(currentLowerRight.y - projectedLowerRight.y) > metresPerPixel * 0.5;
+      if (changed) throw new Error('The map changed during capture. Please retry the GeoTIFF export.');
+      return { canvas, projectedTopLeft, projectedLowerRight };
     }
     // Write a baseline 8-bit RGB GeoTIFF with EPSG:3857 tie point and pixel
     // scale. This keeps the export standalone and avoids a geospatial backend.
@@ -1840,15 +1876,12 @@
       return buffer;
     }
     async function getMapGeoTIFF() {
-      const canvas = await visibleMapCanvas();
-      // Leaflet's WGS84 map is displayed on a Web Mercator plane. Writing
-      // native EPSG:3857 georeferencing avoids incorrectly treating screen
-      // pixels as equally spaced WGS84 degrees (which would distort the view).
-      const topLeft = map.options.crs.project(map.containerPointToLatLng([0,0]));
-      const lowerRight = map.options.crs.project(map.containerPointToLatLng([canvas.width,canvas.height]));
-      const scaleX = (lowerRight.x - topLeft.x) / canvas.width;
-      const scaleY = (topLeft.y - lowerRight.y) / canvas.height;
-      const tiff = writeGeoTIFF(canvas, topLeft.x, topLeft.y, scaleX, scaleY);
+      const { canvas, projectedTopLeft, projectedLowerRight } = await visibleMapCanvas();
+      // Use the exact EPSG:3857 corners captured at the START of rendering.
+      // Image and metadata now share one stable viewport snapshot.
+      const scaleX = (projectedLowerRight.x - projectedTopLeft.x) / canvas.width;
+      const scaleY = (projectedTopLeft.y - projectedLowerRight.y) / canvas.height;
+      const tiff = writeGeoTIFF(canvas, projectedTopLeft.x, projectedTopLeft.y, scaleX, scaleY);
       return { filename: `${exportStem(exportFileName.value || 'SurveyLine Map')}.tif`,
         blob: new Blob([tiff], {type:'image/tiff'}), mime:'image/tiff', format:'tif', count:0 };
     }
