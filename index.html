@@ -33,6 +33,21 @@
     .survey-parameter-input::placeholder { color: #8399a5; }
     .survey-parameter-select:focus-visible, .survey-parameter-input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .survey-dialog .survey-hint { margin: 10px 0 0; font-size: 12px; }
+    .survey-draw { display: block; width: 100%; margin-top: 23px; padding: 13px 16px; border: none; border-radius: 7px; background: #ee9854; color: #082b3f; font-weight: 750; font-size: 14px; }
+    .survey-draw:hover { background: #f6ad71; }
+    .survey-error { padding: 10px 12px; border-radius: 7px; margin: 14px 0 0; background: #fff1ed; border: 1px solid #f4beb1; color: #a13627; font-size: 12px; line-height: 1.45; }
+    .survey-error[hidden] { display: none; }
+    .planned-area { background: #f5f9fb; border: 1px solid #dce8ed; border-radius: 10px; padding: 12px; margin-top: 18px; }
+    .planned-area .section-head h2 { font-size: 16px; }
+    .planned-empty { color: #8296a2; font-size: 12px; padding: 5px 2px; }
+    .planned-item { display: flex; gap: 7px; align-items: center; border: 1px solid #dfe9ef; background: #fff; border-radius: 8px; padding: 9px 7px; margin-top: 8px; }
+    .planned-item input { accent-color: #de3d83; }
+    .planned-item-info { min-width: 0; flex: 1; }
+    .planned-item-info strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .planned-item-info small { display: block; font-size: 10px; color: #6d8997; line-height: 1.4; margin-top: 2px; }
+    .planned-item button { border: 0; border-radius: 5px; background: #eaf3f6; color: #2a657a; padding: 5px 7px; }
+    .planned-item button:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+
     .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
     aside { background: white; padding: 22px; overflow-y: auto; border-right: 1px solid #dce6eb; }
@@ -113,7 +128,7 @@
   <header>
     <strong>◉ SurveyLine</strong>
     <div class="header-actions">
-      <span>Mini GIS · Version 1.5</span>
+      <span>Mini GIS · Version 1.6</span>
     </div>
   </header>
   <div class="shell">
@@ -139,6 +154,11 @@
       <div class="section survey-action">
         <button id="planSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog">Plan Survey</button>
       </div>
+      <section class="planned-area" aria-labelledby="plannedTitle">
+        <div class="section-head"><h2 id="plannedTitle">Planned Lines</h2><button type="button" id="clearPlanned" class="text">Clear all</button></div>
+        <div id="plannedEmpty" class="planned-empty">No survey lines drawn yet.</div>
+        <div id="plannedLines"></div>
+      </section>
       <footer>
         <div>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</div>
         <div class="creator-credit">Webpage made and designed by <strong>Declan Tracy</strong></div>
@@ -218,6 +238,8 @@
           </div>
         </div>
       </div>
+      <p class="survey-error" id="surveyError" role="alert" hidden></p>
+      <button type="button" id="drawSurveyLines" class="survey-draw">Draw Survey Lines</button>
     </section>
   </div>
 
@@ -282,6 +304,12 @@
     const surveyAreaHint = document.getElementById('surveyAreaHint');
     const planSurveyBtn = document.getElementById('planSurveyBtn');
     const closeSurveyModalBtn = document.getElementById('closeSurveyModal');
+    const drawSurveyBtn = document.getElementById('drawSurveyLines');
+    const surveyErrorEl = document.getElementById('surveyError');
+    const plannedLinesEl = document.getElementById('plannedLines');
+    const plannedEmpty = document.getElementById('plannedEmpty');
+    const plannedRecords = new Map();
+    let nextPlanId = 1;
 
     // Only shapefile ZIP imports appear here; GeoJSON and TIFF layers do not.
     // Keep the selected layer by record ID so duplicate file names are safe.
@@ -301,6 +329,7 @@
 
     function openSurveyModal() {
       updateSurveyAreaOptions();
+      surveyErrorEl.hidden = true;
       surveyModal.hidden = false;
       document.body.style.overflow = 'hidden';
       (surveyAreaSelect.disabled ? closeSurveyModalBtn : surveyAreaSelect).focus();
@@ -335,6 +364,215 @@
     });
 
 
+
+    // --- Survey-line generation -------------------------------------------------
+    // Compass bearings in degrees clockwise from true North (0=N/S, 90=E/W).
+    // GeoJSON is WGS84, but spacing/intersections must be computed in metres.
+    // proj4 is already loaded for GeoTIFF support; use a local azimuthal-equidistant
+    // tangent plane centered on the selected survey area.
+    function collectSurveyPolygons(sourceData) {
+      const polygons = [];
+      function visit(node) {
+        if (!node) return;
+        if (node.type === 'FeatureCollection') { (node.features || []).forEach(visit); return; }
+        if (node.type === 'Feature') { visit(node.geometry); return; }
+        if (node.type === 'GeometryCollection') { (node.geometries || []).forEach(visit); return; }
+        if (node.type === 'Polygon') polygons.push(node.coordinates);
+        else if (node.type === 'MultiPolygon') polygons.push(...node.coordinates);
+      }
+      visit(sourceData);
+      if (!polygons.length) throw new Error('The selected shapefile needs to contain a polygon or multipolygon survey area.');
+      return polygons;
+    }
+
+    function projectedSurveyPolygons(sourceData) {
+      const geoPolygons = collectSurveyPolygons(sourceData);
+      const positions = geoPolygons.flatMap(polygon => polygon.flatMap(ring => ring));
+      if (!positions.length || positions.some(pt => !Array.isArray(pt) || pt.length < 2 ||
+          !Number.isFinite(pt[0]) || !Number.isFinite(pt[1]) || Math.abs(pt[1]) > 90 || Math.abs(pt[0]) > 180)) {
+        throw new Error('Survey polygon contains invalid WGS84 coordinates. Verify the shapefile CRS.');
+      }
+      const lons = positions.map(point => point[0]);
+      const lats = positions.map(point => point[1]);
+      const minLon = lons.reduce((a, b) => Math.min(a, b), Infinity);
+      const maxLon = lons.reduce((a, b) => Math.max(a, b), -Infinity);
+      const minLat = lats.reduce((a, b) => Math.min(a, b), Infinity);
+      const maxLat = lats.reduce((a, b) => Math.max(a, b), -Infinity);
+      if (maxLon - minLon > 180) throw new Error('Survey areas crossing the international date line are not supported yet.');
+      if (typeof proj4 !== 'function') throw new Error('Projection library unavailable. Check your internet connection.');
+      const centerLon = (minLon + maxLon) / 2;
+      const centerLat = (minLat + maxLat) / 2;
+      const projection = proj4(`+proj=aeqd +lat_0=${centerLat} +lon_0=${centerLon} +datum=WGS84 +units=m +no_defs`);
+      const projected = geoPolygons.map(polygon => polygon.map(ring => {
+        if (!Array.isArray(ring) || ring.length < 4) throw new Error('Invalid polygon ring in the selected shapefile.');
+        return ring.map(point => projection.forward([point[0], point[1]]));
+      }));
+      if (projected.flat(2).some(point => !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) {
+        throw new Error('Could not project survey polygon into local metre coordinates.');
+      }
+      return { projected, projection };
+    }
+
+    // Intersect one constant-cross-track line with a polygon. The half-open
+    // crossing test avoids counting shared vertices twice. Sorting intersections
+    // and pairing them uses the even-odd rule, so holes and concavities are clipped.
+    function lineSegmentsInPolygon(polygon, crossTrack) {
+      const intersections = [];
+      for (const ring of polygon) {
+        for (let i = 0; i < ring.length; i++) {
+          const a = ring[i], b = ring[(i + 1) % ring.length];
+          if ((a.u <= crossTrack && b.u > crossTrack) ||
+              (b.u <= crossTrack && a.u > crossTrack)) {
+            const t = (crossTrack - a.u) / (b.u - a.u);
+            intersections.push(a.v + t * (b.v - a.v));
+          }
+        }
+      }
+      intersections.sort((a, b) => a - b);
+      if (intersections.length % 2) throw new Error('The survey polygon may have invalid or self-intersecting geometry. Repair it in QGIS.');
+      const segments = [];
+      for (let i = 0; i + 1 < intersections.length; i += 2) {
+        if (intersections[i + 1] - intersections[i] > 0.02) segments.push([intersections[i], intersections[i + 1]]);
+      }
+      return segments;
+    }
+
+    function mergeSurveySegments(intervals) {
+      intervals.sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const interval of intervals) {
+        const previous = merged[merged.length - 1];
+        if (previous && interval[0] <= previous[1] + 0.01) previous[1] = Math.max(previous[1], interval[1]);
+        else merged.push([...interval]);
+      }
+      return merged;
+    }
+
+    function generateSurveyGeometry(data, spacing, bearingDegrees) {
+      const { projected, projection } = projectedSurveyPolygons(data);
+      const angle = bearingDegrees * Math.PI / 180;
+      // Along-track d follows the compass bearing; n is 90° clockwise to it.
+      const dx = Math.sin(angle), dy = Math.cos(angle);
+      const nx = Math.cos(angle), ny = -Math.sin(angle);
+      const shaped = projected.map(polygon => polygon.map(ring => ring.map(([x, y]) => ({
+        u: x * nx + y * ny,
+        v: x * dx + y * dy
+      }))));
+      const all = shaped.flat(2);
+      const across = all.map(point => point.u);
+      const minU = across.reduce((a, b) => Math.min(a, b), Infinity);
+      const maxU = across.reduce((a, b) => Math.max(a, b), -Infinity);
+      const width = maxU - minU;
+      if (!(width > 0.01)) throw new Error('The selected polygon is too narrow or invalid.');
+      // Ignore tiny floating-point noise at exact whole-number spacing ratios.
+      const numberOfLines = Math.max(1, Math.ceil(width / spacing - 1e-9));
+      if (numberOfLines > 2000) throw new Error(`That spacing would generate ${numberOfLines.toLocaleString()} lines. Increase line spacing (maximum 2,000).`);
+      // Center the array with exactly the specified distance between lines.
+      // A single line goes through the middle for polygons narrower than spacing.
+      const firstU = (minU + maxU - (numberOfLines - 1) * spacing) / 2;
+      const features = [];
+      let totalMeters = 0;
+      for (let i = 0; i < numberOfLines; i++) {
+        const u = firstU + i * spacing;
+        const segments = mergeSurveySegments(shaped.flatMap(polygon => lineSegmentsInPolygon(polygon, u)));
+        for (const [v0, v1] of segments) {
+          const toLonLat = v => projection.inverse([u * nx + v * dx, u * ny + v * dy]);
+          const start = toLonLat(v0), end = toLonLat(v1);
+          if (start.some(x => !Number.isFinite(x)) || end.some(x => !Number.isFinite(x))) {
+            throw new Error('Unable to convert generated survey lines to WGS84.');
+          }
+          features.push({ type: 'Feature', properties: { line: i + 1, heading_deg: bearingDegrees, spacing_m: spacing },
+            geometry: { type: 'LineString', coordinates: [start, end] } });
+          totalMeters += v1 - v0;
+          if (features.length > 10000) throw new Error('This survey produces too many separate line segments. Increase spacing or simplify the polygon.');
+        }
+      }
+      if (!features.length) throw new Error('No lines intersected the selected polygon. Try a different orientation or spacing.');
+      return { geojson: { type: 'FeatureCollection', features }, lineCount: numberOfLines,
+        segmentCount: features.length, totalMeters };
+    }
+
+    function updatePlannedEmpty() { plannedEmpty.hidden = plannedRecords.size > 0; }
+
+    function registerSurveyPlan(sourceName, result, spacing, bearingDegrees) {
+      const planNumber = nextPlanId++;
+      const id = String(planNumber);
+      const layer = L.geoJSON(result.geojson, {
+        style: { color: '#f02e91', weight: 3.5, opacity: 1, lineCap: 'round' },
+        onEachFeature(feature, surveyLine) {
+          surveyLine.bindTooltip(`Line ${feature.properties.line} · ${spacing} m spacing`);
+        }
+      });
+      const bounds = layer.getBounds();
+      if (!validBounds(bounds)) throw new Error('The planned lines have invalid coordinates.');
+      plannedRecords.set(id, { layer, bounds, sourceName });
+      layer.addTo(map);
+      const item = document.createElement('div');
+      item.className = 'planned-item';
+      item.dataset.planId = id;
+      item.innerHTML = '<input class="planned-visible" type="checkbox" checked aria-label="Show or hide planned survey lines">' +
+        '<div class="planned-item-info"><strong></strong><small></small></div>' +
+        '<button type="button" class="planned-zoom" title="Zoom to plan" aria-label="Zoom to plan">◎</button>' +
+        '<button type="button" class="planned-remove" title="Remove plan" aria-label="Remove plan">×</button>';
+      item.querySelector('strong').textContent = `Survey Plan ${planNumber} · ${sourceName}`;
+      item.querySelector('small').textContent =
+        `${result.lineCount} passes · ${result.segmentCount} segments · ${spacing} m · ${bearingDegrees}° · ${(result.totalMeters / 1000).toFixed(2)} km`;
+      plannedLinesEl.append(item);
+      updatePlannedEmpty();
+      map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
+    }
+
+    function drawSurveyLines() {
+      surveyErrorEl.hidden = true;
+      try {
+        const record = records.get(surveyAreaSelect.value);
+        if (!record || record.sourceFormat !== 'shapefile') throw new Error('Select an uploaded shapefile as the Survey Area.');
+        const spacingInput = document.getElementById('lineSpacingValue');
+        const orientationInput = document.getElementById('lineOrientationValue');
+        const spacing = spacingInput.value.trim() === '' ? NaN : Number(spacingInput.value);
+        const bearing = orientationInput.value.trim() === '' ? NaN : Number(orientationInput.value);
+        if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Enter a line spacing greater than zero, in metres.');
+        if (!Number.isFinite(bearing) || bearing < 0 || bearing >= 360) throw new Error('Enter a line orientation from 0° to less than 360° (clockwise from North).');
+        const result = generateSurveyGeometry(record.sourceData, spacing, bearing);
+        registerSurveyPlan(record.name, result, spacing, bearing);
+        closeSurveyModal();
+      } catch (err) {
+        surveyErrorEl.textContent = err.message || 'Unable to draw survey lines.';
+        surveyErrorEl.hidden = false;
+        console.error('Survey planning error:', err);
+      }
+    }
+    drawSurveyBtn.addEventListener('click', drawSurveyLines);
+    plannedLinesEl.addEventListener('change', event => {
+      if (!event.target.classList.contains('planned-visible')) return;
+      const record = plannedRecords.get(event.target.closest('.planned-item')?.dataset.planId);
+      if (!record) return;
+      if (event.target.checked) record.layer.addTo(map);
+      else map.removeLayer(record.layer);
+    });
+    plannedLinesEl.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const item = button.closest('.planned-item');
+      const id = item?.dataset.planId;
+      const record = plannedRecords.get(id);
+      if (!record) return;
+      if (button.classList.contains('planned-zoom')) map.fitBounds(record.bounds.pad(0.12), { maxZoom: 15 });
+      if (button.classList.contains('planned-remove')) {
+        map.removeLayer(record.layer);
+        plannedRecords.delete(id);
+        item.remove();
+        updatePlannedEmpty();
+      }
+    });
+    document.getElementById('clearPlanned').addEventListener('click', () => {
+      for (const record of plannedRecords.values()) map.removeLayer(record.layer);
+      plannedRecords.clear();
+      plannedLinesEl.replaceChildren();
+      updatePlannedEmpty();
+    });
+    // --- End survey-line generation ---------------------------------------------
+
     function setStatus(message, isError = false) {
       // Keep routine upload activity out of the sidebar; retain visible error feedback.
       status.textContent = isError ? message : '';
@@ -349,9 +587,9 @@
         bounds.getWest() >= -180 && bounds.getEast() <= 180;
     }
 
-    function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null) {
+    function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null, sourceData = null) {
       const id = String(nextId++);
-      records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat });
+      records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat, sourceData });
       if (visible) layer.addTo(map);
       const item = document.createElement('div');
       item.className = 'layer';
@@ -402,7 +640,7 @@
           throw new Error('Layer coordinates are outside valid WGS84 longitude/latitude. Check that the ZIP includes a correct .prj file.');
         }
         const label = dataset.fileName || filename;
-        registerLayer(label, 'Vector layer', layer, bounds, null, true, fromShapefile ? 'shapefile' : 'geojson');
+        registerLayer(label, 'Vector layer', layer, bounds, null, true, fromShapefile ? 'shapefile' : 'geojson', dataset);
         count++;
       }
       return count;
