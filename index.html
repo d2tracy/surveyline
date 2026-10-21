@@ -94,11 +94,11 @@
     .survey-draw:hover { background: #f6ad71; }
     .survey-error { padding: 10px 12px; border-radius: 7px; margin: 14px 0 0; background: #fff1ed; border: 1px solid #f4beb1; color: #a13627; font-size: 12px; line-height: 1.45; }
     .survey-error[hidden] { display: none; }
-    .planned-area { background: #f5f9fb; border: 1px solid #dce8ed; border-radius: 10px; padding: 12px; margin-top: 18px; }
-    .planned-area .section-head h2 { font-size: 16px; }
-    .planned-empty { color: #8296a2; font-size: 12px; padding: 5px 2px; }
+    /* Planned Lines uses the same unboxed section layout and typography as Imported Layers. */
+    .planned-area { background: transparent; border: 0; padding: 22px 0 0; margin-top: 0; }
+    .planned-empty { color: #78929e; font-size: 13px; padding: 12px 0; }
     /* One plan row contains a collapsible list of individually selectable lines. */
-    .planned-item { border: 1px solid #dfe9ef; background: #fff; border-radius: 8px; margin-top: 8px; overflow: hidden; }
+    .planned-item { border: 1px solid #e2ecf0; background: #fff; border-radius: 8px; margin-top: 8px; overflow: hidden; }
     .planned-header { display: flex; gap: 6px; align-items: center; padding: 8px 6px; }
     .planned-header input { accent-color: #de3d83; margin: 0 2px; }
     .planned-item-info { min-width: 0; flex: 1; }
@@ -204,7 +204,6 @@
     .legend-kind { margin: 4px 0 9px; color: #5a7d8c; font-size: 11px; text-transform: capitalize; }
     .legend-ramp { height: 15px; border: 1px solid #d3dce3; border-radius: 3px; }
     .legend-values { display: flex; justify-content: space-between; gap: 5px; margin-top: 5px; font-size: 11px; font-variant-numeric: tabular-nums; color: #264c5d; }
-    .legend-note { margin-top: 6px; font-size: 10px; color: #718d9a; }
     .legend-options { position: absolute; z-index: 2; top: 36px; right: 8px; left: 8px; max-height: 230px; overflow-y: auto; background: white; border: 1px solid #ccdde5; border-radius: 6px; padding: 5px; box-shadow: 0 6px 14px rgba(9,45,66,.16); }
     .legend-choice { display: block; text-align: left; width: 100%; border: 0; background: transparent; padding: 8px; border-radius: 4px; color: #214b60; font-size: 12px; overflow-wrap: anywhere; }
     .legend-choice:hover, .legend-choice[aria-current="true"] { background: #e8f3f6; }
@@ -213,6 +212,18 @@
     .help { padding: 12px; background: #f3f7f9; border-radius: 9px; }
     .help p { margin: 0; font-size: 12px; }
     footer { color: #8497a2; font-size: 11px; margin-top: 18px; }
+    /* Square-cornered interface: applied last to replace earlier rounded styles,
+       including Leaflet's zoom/scale controls and any dynamically-created popups. */
+    button, input, select, textarea,
+    .upload, .help, .layer, .layer-menu, .planned-area, .planned-item,
+    .planned-details, .planned-line-list, .survey-dialog, .plan-stats-table,
+    .map-legend, .legend-options, .ramp-preview, .legend-ramp,
+    .survey-error, .swath-calculation-inputs, .depth-source, .depth-result,
+    .export-message, #status,
+    .leaflet-bar, .leaflet-bar a, .leaflet-control-scale-line,
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip,
+    .leaflet-tooltip, .leaflet-control, .leaflet-control-layers,
+    .leaflet-control-layers-list { border-radius: 0 !important; }
     @media (max-width: 650px) {
       header { padding: 0 14px; }
       .header-actions { gap: 9px; }
@@ -236,7 +247,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.14</span>
+      <span>Version 1.6.15</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -254,7 +265,7 @@
       </label>
       <div id="status" role="status" aria-live="polite" hidden></div>
       <div class="section">
-        <div class="section-head"><h2>Layers</h2><button class="text" id="clearAll" type="button">Clear all</button></div>
+        <div class="section-head"><h2>Imported Layers</h2><button class="text" id="clearAll" type="button">Clear all</button></div>
         <div id="empty">No datasets loaded yet.</div>
         <div id="layers"></div>
       </div>
@@ -270,7 +281,7 @@
         <button id="exportSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog" aria-controls="exportModal">Export Survey Lines</button>
       </div>
       <footer>
-        <div>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</div>
+        <div>EPSG:4326 longitude/latitude data display</div>
       </footer>
     </aside>
     <div id="sidebarResizer" class="sidebar-resizer" role="separator" tabindex="0"
@@ -287,7 +298,6 @@
         <div class="legend-kind" id="legendKind"></div>
         <div class="legend-ramp" id="legendRamp" aria-hidden="true"></div>
         <div class="legend-values"><span id="legendLeft"></span><span id="legendRight"></span></div>
-        <div class="legend-note">2–98% cumulative count cut</div>
         <div class="legend-options" id="legendOptions" hidden></div>
       </section>
     </div>
@@ -2191,8 +2201,6 @@
       document.getElementById('legendRamp').style.background = rasterGradient(config);
       document.getElementById('legendLeft').textContent = formatLegendValue(leftValue);
       document.getElementById('legendRight').textContent = formatLegendValue(rightValue);
-      document.querySelector('.legend-note').textContent = config.stretch.approximate
-        ? '2–98% count cut · sampled pixels' : '2–98% cumulative count cut';
       legendOptions.replaceChildren();
       for (const [id, record] of eligible) {
         const option = document.createElement('button');
