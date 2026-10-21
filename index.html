@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SurveyLine | Mini GIS</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, sans-serif; color: #17334b; background: #eef4f6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; color: white; background: #092d42; }
+    header strong { font-size: 21px; letter-spacing: -.5px; }
+    header span { font-size: 12px; opacity: .7; }
+    .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
+    aside { background: white; padding: 22px; overflow-y: auto; border-right: 1px solid #dce6eb; }
+    .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #618196; font-weight: 800; }
+    h2 { font-size: 18px; margin: 8px 0 12px; }
+    p { line-height: 1.5; color: #557083; font-size: 13px; }
+    .upload { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 7px; padding: 24px 12px; border: 2px dashed #a7c3d1; border-radius: 12px; cursor: pointer; background: #f4fafc; color: #174f68; }
+    .upload:hover, .upload.dragging { background: #e5f2f7; border-color: #2d829d; }
+    .upload strong { font-size: 14px; }
+    .upload small { font-size: 12px; color: #5e7c8d; line-height: 1.4; }
+    .upload input { display: none; }
+    .section { padding-top: 22px; }
+    .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .section-head h2 { margin: 0; }
+    button { font: inherit; cursor: pointer; }
+    button.text { border: none; background: transparent; color: #217290; font-weight: 600; font-size: 12px; }
+    .layer { display: flex; align-items: center; gap: 8px; padding: 10px 8px; border: 1px solid #e2ecf0; border-radius: 8px; margin-top: 8px; }
+    .layer input { accent-color: #207995; }
+    .layer-name { min-width: 0; flex: 1; }
+    .layer-name strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+    .layer-name small { font-size: 11px; color: #7b909b; }
+    .layer button { border: none; background: #edf5f7; color: #2a657a; border-radius: 5px; padding: 5px 7px; }
+    #empty { font-size: 13px; color: #78929e; padding: 12px 0; }
+    #status { border-radius: 8px; background: #eff5f8; font-size: 12px; padding: 10px; line-height: 1.45; color: #456578; min-height: 39px; word-wrap: break-word; }
+    #status.error { color: #9a3939; background: #fff0ee; }
+    #map { width: 100%; height: 100%; background: #dcebef; }
+    .help { padding: 12px; background: #f3f7f9; border-radius: 9px; }
+    .help p { margin: 0; font-size: 12px; }
+    footer { color: #8497a2; font-size: 11px; margin-top: 18px; }
+    @media (max-width: 650px) {
+      header { padding: 0 14px; }
+      .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
+      aside { order: 2; max-height: 47%; padding: 15px; border-right: 0; border-top: 1px solid #dce6eb; }
+      #map { order: 1; min-height: 53%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>◉ SurveyLine</strong>
+    <span>Mini GIS · Version 0.1</span>
+  </header>
+  <div class="shell">
+    <aside>
+      <div class="eyebrow">Workspace</div>
+      <h2>Import your data</h2>
+      <p>Display survey areas, shapefiles and georeferenced TIFFs on an interactive map.</p>
+      <label class="upload" id="dropZone">
+        <span style="font-size: 24px" aria-hidden="true">⇧</span>
+        <strong>Choose files or drag them here</strong>
+        <small>Shapefile ZIP · GeoTIFF (.tif / .tiff)<br>GeoJSON</small>
+        <input id="files" type="file" multiple accept=".zip,.tif,.tiff,.geojson,.json">
+      </label>
+      <div class="section">
+        <div class="section-head"><h2>Layers</h2><button class="text" id="clearAll" type="button">Clear all</button></div>
+        <div id="empty">No datasets loaded yet.</div>
+        <div id="layers"></div>
+      </div>
+      <div class="section">
+        <div class="eyebrow" style="margin-bottom: 8px">Import status</div>
+        <div id="status" role="status" aria-live="polite">Ready. All data processing happens in your browser.</div>
+      </div>
+      <div class="section help">
+        <p><b>Shapefile:</b> ZIP the .shp, .shx, .dbf and .prj files together. The .prj is essential for projected datasets.</p>
+        <p style="margin-top: 9px"><b>Raster:</b> Upload a georeferenced GeoTIFF. Ordinary TIFF photographs without georeferencing cannot be positioned.</p>
+      </div>
+      <footer>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</footer>
+    </aside>
+    <main id="map" aria-label="Interactive GIS map"></main>
+  </div>
+
+  <!-- Pinned dependencies: no build tools needed. An internet connection is required for the libraries and basemap. -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/shpjs@4.0.4/dist/shp.min.js"></script>
+  <script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js"></script>
+  <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js"></script>
+  <script src="https://unpkg.com/georaster-layer-for-leaflet@4.1.2/dist/v3/webpack/bundle/georaster-layer-for-leaflet.min.js"></script>
+  <script>
+    'use strict';
+
+    const map = L.map('map', { zoomControl: true }).setView([51.9, -8.45], 9);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
+
+    const fileInput = document.getElementById('files');
+    const status = document.getElementById('status');
+    const layersEl = document.getElementById('layers');
+    const empty = document.getElementById('empty');
+    const dropZone = document.getElementById('dropZone');
+    const records = new Map();
+    let nextId = 1;
+
+    function setStatus(message, isError = false) {
+      status.textContent = message;
+      status.classList.toggle('error', isError);
+    }
+
+    function validBounds(bounds) {
+      return bounds && bounds.isValid() &&
+        Number.isFinite(bounds.getSouth()) && Number.isFinite(bounds.getNorth()) &&
+        bounds.getSouth() >= -90 && bounds.getNorth() <= 90 &&
+        bounds.getWest() >= -180 && bounds.getEast() <= 180;
+    }
+
+    function registerLayer(name, kind, layer, bounds, visible = true) {
+      const id = String(nextId++);
+      records.set(id, { name, kind, layer, bounds });
+      if (visible) layer.addTo(map);
+      const item = document.createElement('div');
+      item.className = 'layer';
+      item.dataset.id = id;
+      item.innerHTML = `
+        <input class="visible" type="checkbox" checked aria-label="Toggle layer visibility">
+        <div class="layer-name"><strong></strong><small></small></div>
+        <button class="zoom" type="button" title="Zoom to layer" aria-label="Zoom to layer">◎</button>
+        <button class="remove" type="button" title="Remove layer" aria-label="Remove layer">×</button>`;
+      item.querySelector('strong').textContent = name;
+      item.querySelector('small').textContent = kind;
+      layersEl.prepend(item);
+      empty.style.display = 'none';
+      map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
+    }
+
+    function addGeoJSON(data, filename) {
+      const datasets = Array.isArray(data) ? data : [data];
+      let count = 0;
+      for (const dataset of datasets) {
+        if (!dataset || !['FeatureCollection', 'Feature', 'GeometryCollection', 'Polygon', 'MultiPolygon', 'LineString', 'MultiLineString', 'Point', 'MultiPoint'].includes(dataset.type)) {
+          throw new Error('Input did not contain valid GeoJSON geometry.');
+        }
+        const layer = L.geoJSON(dataset, {
+          style: { color: '#f18a3b', weight: 2.5, fillColor: '#f18a3b', fillOpacity: .13 },
+          pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 5, color: '#d66b25', fillColor: '#f18a3b', fillOpacity: 0.8 })
+        });
+        const bounds = layer.getBounds();
+        if (!validBounds(bounds)) {
+          throw new Error('Layer coordinates are outside valid WGS84 longitude/latitude. Check that the ZIP includes a correct .prj file.');
+        }
+        const label = dataset.fileName || filename;
+        registerLayer(label, 'Vector layer', layer, bounds);
+        count++;
+      }
+      return count;
+    }
+
+    async function addShapefile(file) {
+      if (typeof shp !== 'function') throw new Error('Shapefile reader did not load. Check your internet connection.');
+      const result = await shp(await file.arrayBuffer());
+      const count = addGeoJSON(result, file.name);
+      setStatus(`Loaded ${count} shapefile layer${count === 1 ? '' : 's'} from ${file.name}.`);
+    }
+
+    async function addRaster(file) {
+      if (typeof parseGeoraster !== 'function' || typeof GeoRasterLayer !== 'function') {
+        throw new Error('Raster libraries did not load. Check your internet connection.');
+      }
+      if (file.size > 60 * 1024 * 1024) {
+        throw new Error('This starter limits rasters to 60 MB. Export a small, clipped GeoTIFF for testing.');
+      }
+      const georaster = await parseGeoraster(await file.arrayBuffer());
+      if (georaster.projection == null) {
+        throw new Error('This TIFF has no recognized CRS. In QGIS, export a georeferenced GeoTIFF with EPSG:4326.');
+      }
+      const minimum = Number(georaster.mins?.[0]);
+      const maximum = Number(georaster.maxs?.[0]);
+      const min = Number.isFinite(minimum) ? minimum : 0;
+      const max = Number.isFinite(maximum) && maximum > min ? maximum : min + 1;
+      const isRGB = georaster.numberOfRasters >= 3;
+      const color = values => {
+        if (!values || values[0] == null || !Number.isFinite(values[0])) return null;
+        if (isRGB) {
+          const channels = values.slice(0, 3);
+          if (channels.some(v => v == null || !Number.isFinite(v))) return null;
+          return `rgb(${channels.map(v => Math.max(0, Math.min(255, Math.round(v)))).join(',')})`;
+        }
+        const fraction = Math.min(1, Math.max(0, (values[0] - min) / (max - min)));
+        const r = Math.round(18 + 192 * fraction);
+        const g = Math.round(80 + 155 * fraction);
+        const b = Math.round(138 + 100 * fraction);
+        return `rgb(${r},${g},${b})`;
+      };
+      const layer = new GeoRasterLayer({ georaster, opacity: 0.82, resolution: 128, pixelValuesToColorFn: color });
+      const bounds = layer.getBounds();
+      if (!validBounds(bounds)) throw new Error('Raster extent is invalid or its CRS is unsupported. Reproject to EPSG:4326 in QGIS.');
+      registerLayer(file.name, `Raster · EPSG:${String(georaster.projection).replace('EPSG:', '')}`, layer, bounds);
+      setStatus(`Loaded georeferenced raster ${file.name}.`);
+    }
+
+    async function processFiles(fileList) {
+      const files = Array.from(fileList);
+      if (!files.length) return;
+      let errors = 0;
+      for (const file of files) {
+        setStatus(`Reading ${file.name}…`);
+        try {
+          const name = file.name.toLowerCase();
+          if (name.endsWith('.zip')) await addShapefile(file);
+          else if (name.endsWith('.tif') || name.endsWith('.tiff')) await addRaster(file);
+          else if (name.endsWith('.geojson') || name.endsWith('.json')) {
+            const data = JSON.parse(await file.text());
+            addGeoJSON(data, file.name);
+            setStatus(`Loaded ${file.name}.`);
+          } else throw new Error('Unsupported file type. Use a shapefile ZIP, GeoTIFF, or GeoJSON.');
+        } catch (error) {
+          errors++;
+          console.error('Import error for ' + file.name, error);
+          setStatus(`${file.name}: ${error.message || 'Unknown import error'}`, true);
+        }
+      }
+      if (!errors && files.length > 1) setStatus(`Successfully loaded ${files.length} file(s).`);
+    }
+
+    fileInput.addEventListener('change', async event => {
+      await processFiles(event.target.files);
+      fileInput.value = '';
+    });
+    dropZone.addEventListener('dragover', event => { event.preventDefault(); dropZone.classList.add('dragging'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+    dropZone.addEventListener('drop', async event => {
+      event.preventDefault();
+      dropZone.classList.remove('dragging');
+      await processFiles(event.dataTransfer.files);
+    });
+
+    layersEl.addEventListener('change', event => {
+      if (!event.target.classList.contains('visible')) return;
+      const rec = records.get(event.target.closest('.layer').dataset.id);
+      if (!rec) return;
+      if (event.target.checked) rec.layer.addTo(map);
+      else map.removeLayer(rec.layer);
+    });
+    layersEl.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const item = button.closest('.layer');
+      const id = item.dataset.id;
+      const rec = records.get(id);
+      if (!rec) return;
+      if (button.classList.contains('zoom')) map.fitBounds(rec.bounds.pad(0.12), { maxZoom: 15 });
+      if (button.classList.contains('remove')) {
+        map.removeLayer(rec.layer);
+        records.delete(id);
+        item.remove();
+        empty.style.display = records.size ? 'none' : 'block';
+      }
+    });
+    document.getElementById('clearAll').addEventListener('click', () => {
+      for (const rec of records.values()) map.removeLayer(rec.layer);
+      records.clear();
+      layersEl.replaceChildren();
+      empty.style.display = 'block';
+      setStatus('All user layers cleared.');
+    });
+  </script>
+</body>
+</html>
