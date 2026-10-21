@@ -285,7 +285,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.20</span>
+      <span>Version 1.6.21</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1866,12 +1866,19 @@
         if (r%65===0) await new Promise(resolve=>setTimeout(resolve,0));
       }
       if (!red&&!yellow&&!green) throw new Error('No valid bathymetry pixels inside the selected polygon.');
+      const originX = native.xmin + left*native.pixelWidth;
+      const originY = native.ymax - top*native.pixelHeight;
+      const scaleX = native.pixelWidth*factor;
+      const scaleY = native.pixelHeight*factor;
       const buffer=writeCoveragePaletteTIFF(result,width,height,
-        native.xmin+left*native.pixelWidth,native.ymax-top*native.pixelHeight,
-        native.pixelWidth*factor,native.pixelHeight*factor,native.code);
+        originX,originY,scaleX,scaleY,native.code);
       return {blob:new Blob([buffer],{type:'image/tiff'}),
         filename:`${exportStem(name)}-projected-coverage.tif`,
         stats:{width,height,factor,red,yellow,green,invalid,usableLines,gapsOnTracks},
+        // Keep the actual 0/1/2/3 classifications for the browser preview.
+        // Do not re-decode the palette TIFF: its ColorMap is intended for GIS
+        // software and some in-browser GeoTIFF paths reinterpret indexed data.
+        preview:{pixels:result,width,height,originX,originY,scaleX,scaleY,code:Number(native.code)},
         bytes:buffer};
     }
 
@@ -1886,14 +1893,54 @@
         rec.sourceFormat==='coverage' && map.hasLayer(rec.layer));
     }
     async function addCoveragePreview(coverage, planLayer) {
-      if (typeof parseGeoraster !== 'function' || typeof GeoRasterLayer !== 'function') return;
-      const raster=await parseGeoraster(await coverage.blob.arrayBuffer());
-      const preview=new GeoRasterLayer({georaster:raster,opacity:0.8,resolution:128,
-        pixelValuesToColorFn: values => {
-          const value=values?.[0];
-          return value===1?'#d63237':value===2?'#f6d539':value===3?'#26a05a':null;
-        }});
-      const bounds=preview.getBounds();
+      const info = coverage.preview;
+      if (!info || !(info.pixels instanceof Uint8Array) ||
+          info.pixels.length !== info.width * info.height)
+        throw new Error('Coverage preview pixels are missing.');
+      const {pixels,width,height,originX,originY,scaleX,scaleY,code} = info;
+      let preview, bounds;
+      if (code === 4326) {
+        // A geographic north-up raster maps exactly to a Leaflet ImageOverlay.
+        // Draw classes DIRECTLY from the result array, not from the palette
+        // GeoTIFF. This guarantees the preview and exported class codes match.
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        const image = ctx.createImageData(width,height);
+        const rgba = image.data;
+        const colors = [[0,0,0,0],[214,50,55,255],[246,213,57,255],[38,160,90,255]];
+        for (let i=0;i<pixels.length;i++) {
+          const color = colors[pixels[i]] || colors[0];
+          const offset = i*4;
+          rgba[offset]=color[0]; rgba[offset+1]=color[1];
+          rgba[offset+2]=color[2]; rgba[offset+3]=color[3];
+        }
+        ctx.putImageData(image,0,0);
+        bounds=L.latLngBounds(
+          [originY-height*scaleY,originX],
+          [originY,originX+width*scaleX]
+        );
+        preview=L.imageOverlay(canvas.toDataURL('image/png'),bounds,{opacity:1,interactive:false});
+      } else {
+        // For projected bathymetry, let GeoRasterLayer reproject a raw
+        // numerical GeoRaster in-browser. Avoid reading the palette TIFF.
+        if (typeof parseGeoraster !== 'function' || typeof GeoRasterLayer !== 'function')
+          throw new Error('Raster preview libraries are unavailable.');
+        const rows=Array.from({length:height},(_,r)=>
+          pixels.subarray(r*width,(r+1)*width));
+        const raster=await parseGeoraster([rows],{
+          projection:code, xmin:originX, ymax:originY,
+          pixelWidth:scaleX, pixelHeight:scaleY,
+          width,height,noDataValue:0
+        });
+        preview=new GeoRasterLayer({georaster:raster,opacity:1,resolution:256,
+          resampleMethod:'nearest',
+          pixelValuesToColorFn: values => {
+            const value=values?.[0];
+            return value===1?'#d63237':value===2?'#f6d539':value===3?'#26a05a':null;
+          }});
+        bounds=preview.getBounds();
+      }
       if (!validBounds(bounds)) throw new Error('Coverage TIFF bounds cannot be displayed.');
       registerLayer(coverage.filename,'Projected coverage · 0 NoData · 1 red · 2 yellow · 3 green',
         preview,bounds,null,true,'coverage');
@@ -3000,7 +3047,7 @@
       return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     function updateMapLegend() {
-      const eligible = [...records].filter(([, rec]) => rec.rasterConfig && rec.rasterConfig.type !== 'none');
+      const eligible = [...records].filter(([, rec]) => rec.rasterConfig && rec.rasterConfig.type !== 'none' && map.hasLayer(rec.layer));
       if (!eligible.length) {
         selectedLegendId = null;
         legendEl.hidden = true;
@@ -3171,6 +3218,7 @@
         if (event.target.checked) rec.layer.addTo(map);
         else map.removeLayer(rec.layer);
         updateCoverageLegend();
+        updateMapLegend();
       } else if (event.target.classList.contains('raster-type') && rec.rasterConfig) {
         // Ensure no more than one TIFF is marked Bathymetry. Newly selected wins.
         if (event.target.value === 'bathymetry') {
