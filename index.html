@@ -224,6 +224,23 @@
     .leaflet-popup-content-wrapper, .leaflet-popup-tip,
     .leaflet-tooltip, .leaflet-control, .leaflet-control-layers,
     .leaflet-control-layers-list { border-radius: 0 !important; }
+
+    /* Polygon creation: match the Imported Layers layout and square-corner visual style. */
+    .create-shape-btn { width: 100%; margin-top: 12px; border: 1px solid #327eaa; background: #2777a6; color: white; padding: 10px; font-size: 13px; font-weight: 700; }
+    .create-shape-btn:hover, .create-shape-btn:focus-visible { background: #17628e; }
+    .shape-modal-note { margin: -8px 0 18px; color: #547386; }
+    .shape-method-field { margin-top: 18px; }
+    .shape-method-instructions { padding: 11px 12px; background: #f2f7f9; border-left: 3px solid #2777a6; font-size: 12px; margin: 10px 0 0; }
+    .shape-draw-btn { background: #2777a6; color: white; }
+    .shape-draw-btn:hover { background: #17628e; }
+    .drawing-notice { position: absolute; z-index: 1100; top: 14px; left: 55px; right: 245px; max-width: 620px; display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid #9dbdcf; background: rgba(255,255,255,.96); box-shadow: 0 2px 10px #14354d30; font-size: 12px; }
+    .drawing-notice[hidden] { display: none; }
+    .drawing-notice span { flex: 1; }
+    .drawing-notice button { padding: 6px 9px; border: 1px solid #9dbdcf; background: #e9f2f7; color: #17334b; white-space: nowrap; }
+    #map.drawing-polygon { cursor: crosshair !important; }
+    .created-layer { align-items: center; }
+    .created-layer .download-shp { white-space: nowrap; font-size: 11px; }
+    @media(max-width: 650px) { .drawing-notice { top: 12px; left: 12px; right: 12px; flex-wrap: wrap; } }
     @media (max-width: 650px) {
       header { padding: 0 14px; }
       .header-actions { gap: 9px; }
@@ -247,7 +264,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.15</span>
+      <span>Version 1.6.16</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -269,6 +286,12 @@
         <div id="empty">No datasets loaded yet.</div>
         <div id="layers"></div>
       </div>
+      <section class="section" aria-labelledby="createdLayersTitle">
+        <div class="section-head"><h2 id="createdLayersTitle">Created Layers</h2><button class="text" id="clearCreated" type="button">Clear all</button></div>
+        <div id="createdEmpty" class="planned-empty">No shapes created yet.</div>
+        <div id="createdLayers"></div>
+        <button id="createShapeBtn" class="create-shape-btn" type="button" aria-haspopup="dialog" aria-controls="createShapeModal">+ Create Shape</button>
+      </section>
       <div class="section survey-action">
         <button id="planSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog">Plan Survey</button>
       </div>
@@ -290,6 +313,10 @@
          title="Drag to resize the sidebar (double-click to reset)"></div>
     <div class="map-stage">
       <main id="map" aria-label="Interactive GIS map"></main>
+      <div id="drawingNotice" class="drawing-notice" role="status" hidden>
+        <span id="drawingNoticeText"></span>
+        <button type="button" id="cancelDrawing" aria-label="Cancel drawing">Cancel (Esc)</button>
+      </div>
       <section class="map-legend" id="mapLegend" aria-label="Raster color legend" hidden>
         <div class="legend-top">
           <span class="legend-name" id="legendName"></span>
@@ -303,6 +330,29 @@
     </div>
   </div>
 
+  <div class="survey-modal-backdrop" id="createShapeModal" hidden>
+    <section class="survey-dialog" role="dialog" aria-modal="true" aria-labelledby="createShapeTitle">
+      <div class="survey-dialog-head">
+        <h2 id="createShapeTitle">Create Shape</h2>
+        <button id="closeCreateShape" class="survey-close" type="button" aria-label="Close Create Shape window">×</button>
+      </div>
+      <p class="shape-modal-note">Only polygons can be drawn. Your shape will be added to Created Layers and can be used as a survey area.</p>
+      <div class="survey-field">
+        <label for="createdShapeName">Shape name</label>
+        <input id="createdShapeName" class="survey-name-input" type="text" value="Shape 1" maxlength="80" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="survey-field shape-method-field">
+        <label for="createdShapeMethod">Drawing method</label>
+        <select id="createdShapeMethod" class="survey-area-select">
+          <option value="freehand">Freehand</option>
+          <option value="rectangle">Rectangle</option>
+        </select>
+        <p id="shapeMethodInstructions" class="shape-method-instructions">Click the map to place polygon corners. Use at least three points, then right-click to finish. Press Esc to cancel.</p>
+      </div>
+      <button id="beginShapeDrawing" class="survey-draw shape-draw-btn" type="button">Draw Shape</button>
+    </section>
+  </div>
+
   <div class="survey-modal-backdrop" id="surveyModal" hidden>
     <section class="survey-dialog" role="dialog" aria-modal="true" aria-labelledby="surveyDialogTitle">
       <div class="survey-dialog-head">
@@ -313,7 +363,7 @@
       <select id="surveyAreaSelect" class="survey-area-select" aria-describedby="surveyAreaHint">
         <option value="">Select a shapefile…</option>
       </select>
-      <p class="survey-hint" id="surveyAreaHint" hidden>No shapefiles loaded. Upload a zipped shapefile to select a survey area.</p>
+      <p class="survey-hint" id="surveyAreaHint" hidden>Upload a polygon shapefile or draw a polygon under Created Layers to select a survey area.</p>
       <div class="survey-name-field">
         <label for="linePlanName">Line Plan Name</label>
         <input id="linePlanName" class="survey-name-input" type="text" value="Line Plan" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Line Plan">
@@ -478,6 +528,7 @@
   <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js"></script>
   <script src="https://unpkg.com/georaster-layer-for-leaflet@4.1.2/dist/v3/webpack/bundle/georaster-layer-for-leaflet.min.js"></script>
   <script src="https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
     'use strict';
 
@@ -614,6 +665,8 @@
     const empty = document.getElementById('empty');
     const dropZone = document.getElementById('dropZone');
     const records = new Map();
+    const createdRecords = new Map();
+    let nextCreatedId = 1;
     let nextId = 1;
     // Keeps its selection until that raster is removed or set back to "None".
     let selectedLegendId = null;
@@ -808,18 +861,27 @@
     const exportPlanSummaryPdfBtn = document.getElementById('exportPlanSummaryPdf');
 
 
-    // Only shapefile ZIP imports appear here; GeoJSON and TIFF layers do not.
-    // Keep the selected layer by record ID so duplicate file names are safe.
+    // Imported polygon shapefiles and hand-created polygons can both be
+    // survey areas. Created layer keys are prefixed to avoid ID collisions.
+    function selectedSurveyAreaRecord() {
+      return records.get(surveyAreaSelect.value) || createdRecords.get(surveyAreaSelect.value) || null;
+    }
+    function validSurveyArea(record) {
+      return record && (record.sourceFormat === 'shapefile' || record.sourceFormat === 'created');
+    }
     function updateSurveyAreaOptions() {
       const previous = surveyAreaSelect.value;
-      surveyAreaSelect.replaceChildren(new Option('Select a shapefile…', ''));
+      surveyAreaSelect.replaceChildren(new Option('Select a shapefile or created polygon…', ''));
       let count = 0;
       for (const [id, record] of records) {
         if (record.sourceFormat !== 'shapefile') continue;
-        surveyAreaSelect.add(new Option(record.name, id));
-        count++;
+        surveyAreaSelect.add(new Option(record.name, id)); count++;
       }
-      surveyAreaSelect.value = count && records.get(previous)?.sourceFormat === 'shapefile' ? previous : '';
+      for (const [id, record] of createdRecords) {
+        surveyAreaSelect.add(new Option(`${record.name} (created)`, id)); count++;
+      }
+      if (validSurveyArea(records.get(previous)) || validSurveyArea(createdRecords.get(previous))) surveyAreaSelect.value = previous;
+      else surveyAreaSelect.value = '';
       surveyAreaSelect.disabled = count === 0;
       surveyAreaHint.hidden = count > 0;
     }
@@ -846,8 +908,8 @@
     }
     function updateDepthSource() {
       const active = activeBathymetryLayer();
-      const selectedArea = records.get(surveyAreaSelect.value);
-      const validArea = selectedArea?.sourceFormat === 'shapefile';
+      const selectedArea = selectedSurveyAreaRecord();
+      const validArea = validSurveyArea(selectedArea);
       if (!active) {
         depthSourceEl.textContent = 'No bathymetry layer selected. Use a TIFF layer’s ⋮ menu to set its type to Bathymetry.';
         calculateDepthFromRasterBtn.textContent = 'Calculate from bathymetry layer';
@@ -988,8 +1050,8 @@
     }
     calculateDepthFromRasterBtn.addEventListener('click', async () => {
       const active = activeBathymetryLayer();
-      const area = records.get(surveyAreaSelect.value);
-      if (!active || area?.sourceFormat !== 'shapefile') { updateDepthSource(); return; }
+      const area = selectedSurveyAreaRecord();
+      if (!active || !validSurveyArea(area)) { updateDepthSource(); return; }
       const selectedRasterId = active.id;
       const selectedAreaId = surveyAreaSelect.value;
       calculateDepthFromRasterBtn.disabled = true;
@@ -1447,8 +1509,8 @@
     function drawSurveyLines() {
       surveyErrorEl.hidden = true;
       try {
-        const record = records.get(surveyAreaSelect.value);
-        if (!record || record.sourceFormat !== 'shapefile') throw new Error('Select an uploaded shapefile as the Survey Area.');
+        const record = selectedSurveyAreaRecord();
+        if (!validSurveyArea(record)) throw new Error('Select an imported shapefile or a created polygon as the Survey Area.');
         const orientationInput = document.getElementById('lineOrientationValue');
         // Use the full-precision value in calculated mode; the textbox is only a rounded display.
         updateSwathCalculation();
@@ -1969,6 +2031,256 @@
         bounds.getSouth() >= -90 && bounds.getNorth() <= 90 &&
         bounds.getWest() >= -180 && bounds.getEast() <= 180;
     }
+
+
+    // --- Locally created polygon layers -----------------------------------------
+    const createShapeModal = document.getElementById('createShapeModal');
+    const createShapeBtn = document.getElementById('createShapeBtn');
+    const closeCreateShapeBtn = document.getElementById('closeCreateShape');
+    const createdShapeName = document.getElementById('createdShapeName');
+    const createdShapeMethod = document.getElementById('createdShapeMethod');
+    const shapeMethodInstructions = document.getElementById('shapeMethodInstructions');
+    const beginShapeDrawingBtn = document.getElementById('beginShapeDrawing');
+    const createdLayersEl = document.getElementById('createdLayers');
+    const createdEmptyEl = document.getElementById('createdEmpty');
+    const drawingNotice = document.getElementById('drawingNotice');
+    const drawingNoticeText = document.getElementById('drawingNoticeText');
+    const cancelDrawingBtn = document.getElementById('cancelDrawing');
+    let drawing = null;
+
+    function refreshCreatedEmpty() {
+      createdEmptyEl.hidden = createdRecords.size > 0;
+    }
+    function updateShapeInstructions() {
+      shapeMethodInstructions.textContent = createdShapeMethod.value === 'freehand'
+        ? 'Click the map to add polygon corners (at least three). Right-click to finish the polygon. Press Esc to cancel.'
+        : 'Left-click your first corner, drag to size the rectangle, then right-click to finish. Press Esc to cancel.';
+    }
+    function openCreateShapeModal() {
+      if (drawing) stopDrawing();
+      createdShapeName.value = `Shape ${nextCreatedId}`;
+      updateShapeInstructions();
+      createShapeModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      createdShapeName.focus();
+      createdShapeName.select();
+    }
+    function closeCreateShapeModal() {
+      createShapeModal.hidden = true;
+      document.body.style.overflow = '';
+      createShapeBtn.focus();
+    }
+    createShapeBtn.addEventListener('click', openCreateShapeModal);
+    closeCreateShapeBtn.addEventListener('click', closeCreateShapeModal);
+    createShapeModal.addEventListener('click', event => {
+      if (event.target === createShapeModal) closeCreateShapeModal();
+    });
+    createdShapeMethod.addEventListener('change', updateShapeInstructions);
+    createShapeModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); closeCreateShapeModal(); }
+      if (event.key === 'Tab') {
+        const controls = Array.from(createShapeModal.querySelectorAll('button, input, select'));
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    });
+    function stopDrawing() {
+      if (!drawing) return;
+      if (drawing.preview) map.removeLayer(drawing.preview);
+      drawing = null;
+      map.getContainer().classList.remove('drawing-polygon');
+      map.doubleClickZoom.enable();
+      map.dragging.enable();
+      drawingNotice.hidden = true;
+    }
+    cancelDrawingBtn.addEventListener('click', stopDrawing);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && drawing) { event.preventDefault(); stopDrawing(); }
+    });
+    beginShapeDrawingBtn.addEventListener('click', () => {
+      const name = createdShapeName.value.trim().slice(0, 80) || `Shape ${nextCreatedId}`;
+      const method = createdShapeMethod.value;
+      closeCreateShapeModal();
+      drawing = { name, method, corners: [], start: null, current: null, preview: null };
+      map.dragging.disable();
+      map.doubleClickZoom.disable();
+      map.getContainer().classList.add('drawing-polygon');
+      drawingNotice.hidden = false;
+      drawingNoticeText.textContent = method === 'freehand'
+        ? 'Freehand: click to add vertices; right-click to finish (at least 3 vertices).'
+        : 'Rectangle: left-click the first corner, drag to size, then right-click to finish.';
+    });
+    function updateDrawingPreview(latlng) {
+      if (!drawing) return;
+      let previewLayer = null;
+      const common = { color: '#147ca8', weight: 2, dashArray: '6,4', fillColor: '#51a8c4', fillOpacity: 0.17, interactive: false };
+      if (drawing.method === 'rectangle' && drawing.start) {
+        drawing.current = latlng;
+        previewLayer = L.rectangle(L.latLngBounds(drawing.start, latlng), common);
+      } else if (drawing.method === 'freehand' && drawing.corners.length) {
+        const vertices = [...drawing.corners, latlng];
+        previewLayer = vertices.length >= 3 ? L.polygon(vertices, common) : L.polyline(vertices, common);
+      }
+      if (drawing.preview) map.removeLayer(drawing.preview);
+      drawing.preview = previewLayer;
+      if (previewLayer) previewLayer.addTo(map);
+    }
+    map.on('mousedown', event => {
+      if (!drawing || drawing.method !== 'rectangle' || event.originalEvent.button !== 0) return;
+      drawing.start = event.latlng;
+      drawing.current = event.latlng;
+      updateDrawingPreview(event.latlng);
+    });
+    map.on('click', event => {
+      if (!drawing || drawing.method !== 'freehand') return;
+      drawing.corners.push(event.latlng);
+      drawingNoticeText.textContent = `${drawing.corners.length} corner${drawing.corners.length === 1 ? '' : 's'}: click to add more; right-click to finish.`;
+      updateDrawingPreview(event.latlng);
+    });
+    map.on('mousemove', event => {
+      if (!drawing) return;
+      updateDrawingPreview(event.latlng);
+    });
+    map.on('contextmenu', event => {
+      if (!drawing) return;
+      if (event.originalEvent) event.originalEvent.preventDefault();
+      if (drawing.method === 'freehand' && drawing.corners.length < 3) {
+        drawingNoticeText.textContent = 'Add at least three corners before right-clicking to finish.';
+        return;
+      }
+      if (drawing.method === 'rectangle' && !drawing.start) {
+        drawingNoticeText.textContent = 'Left-click a starting corner first, then drag and right-click.';
+        return;
+      }
+      try {
+        let ring;
+        if (drawing.method === 'freehand') {
+          ring = drawing.corners.map(p => [p.lng, p.lat]);
+        } else {
+          const end = drawing.current || event.latlng;
+          const west = Math.min(drawing.start.lng, end.lng), east = Math.max(drawing.start.lng, end.lng);
+          const south = Math.min(drawing.start.lat, end.lat), north = Math.max(drawing.start.lat, end.lat);
+          ring = [[west, south], [west, north], [east, north], [east, south]];
+        }
+        // Reject collapsed polygons before making an actual map layer.
+        const unique = new Set(ring.map(([x,y]) => `${x.toFixed(9)},${y.toFixed(9)}`));
+        const twiceArea = ring.reduce((a,p,i) => a + p[0]*ring[(i+1)%ring.length][1] - ring[(i+1)%ring.length][0]*p[1], 0);
+        if (unique.size < 3 || Math.abs(twiceArea) < 1e-12) {
+          drawingNoticeText.textContent = 'Shape has no measurable area. Add more separated points and right-click again.';
+          return;
+        }
+        ring.push([...ring[0]]);
+        const name = drawing.name;
+        stopDrawing();
+        registerCreatedPolygon(name, ring);
+      } catch (error) {
+        drawingNoticeText.textContent = error.message || 'Unable to create polygon.';
+      }
+    });
+    function registerCreatedPolygon(name, ring) {
+      const id = `created-${nextCreatedId++}`;
+      const sourceData = { type: 'Feature', properties: { NAME: name }, geometry: { type: 'Polygon', coordinates: [ring] } };
+      const layer = L.geoJSON(sourceData, { style: { color: '#187ba4', weight: 2.5, fillColor: '#40a0c3', fillOpacity: .16 } });
+      const bounds = layer.getBounds();
+      if (!validBounds(bounds)) throw new Error('Shape coordinates are outside valid WGS84 limits.');
+      const rec = { id, name, layer, bounds, sourceFormat: 'created', sourceData };
+      createdRecords.set(id, rec);
+      layer.addTo(map);
+      const item = document.createElement('div');
+      item.className = 'layer created-layer';
+      item.dataset.id = id;
+      item.innerHTML = `<input class="visible" type="checkbox" checked aria-label="Toggle created shape visibility">
+        <div class="layer-name"><strong></strong><small>Polygon · WGS84</small></div>
+        <button class="download-shp" type="button" title="Download polygon as zipped shapefile" aria-label="Download shapefile">↓ SHP</button>
+        <button class="zoom" type="button" title="Zoom to shape" aria-label="Zoom to shape">◎</button>
+        <button class="remove" type="button" title="Remove shape" aria-label="Remove shape">×</button>`;
+      item.querySelector('strong').textContent = name;
+      createdLayersEl.append(item);
+      refreshCreatedEmpty();
+      updateSurveyAreaOptions();
+    }
+    function deleteCreatedRecord(id) {
+      const rec = createdRecords.get(id);
+      if (!rec) return;
+      map.removeLayer(rec.layer);
+      createdRecords.delete(id);
+      createdLayersEl.querySelectorAll('.created-layer').forEach(item => { if (item.dataset.id === id) item.remove(); });
+      refreshCreatedEmpty();
+      updateSurveyAreaOptions();
+      updateDepthSource();
+    }
+    createdLayersEl.addEventListener('change', event => {
+      if (!event.target.matches('.visible')) return;
+      const rec = createdRecords.get(event.target.closest('.created-layer').dataset.id);
+      if (rec) { if (event.target.checked) rec.layer.addTo(map); else map.removeLayer(rec.layer); }
+    });
+    createdLayersEl.addEventListener('click', async event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const rec = createdRecords.get(button.closest('.created-layer').dataset.id);
+      if (!rec) return;
+      if (button.classList.contains('zoom')) map.fitBounds(rec.bounds.pad(0.12), { maxZoom: 17 });
+      if (button.classList.contains('remove')) deleteCreatedRecord(rec.id);
+      if (button.classList.contains('download-shp')) {
+        try {
+          button.disabled = true;
+          const blob = await polygonShapefileZip(rec.name, rec.sourceData.geometry.coordinates[0]);
+          const filename = (rec.name.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 60) || 'Shape') + '.zip';
+          downloadBlob(blob, filename);
+        } catch (err) { alert(err.message || 'Shapefile export failed.'); }
+        finally { button.disabled = false; }
+      }
+    });
+    document.getElementById('clearCreated').addEventListener('click', () => {
+      for (const id of [...createdRecords.keys()]) deleteCreatedRecord(id);
+    });
+
+    // A real ESRI Shapefile (Polygon type 5, .shp/.shx/.dbf/.prj) stored in ZIP.
+    // GeoJSON coordinates are WGS84 long/lat. ESRI polygon exterior rings
+    // are clockwise; reverse a counter-clockwise ring before writing.
+    async function polygonShapefileZip(name, coordinates) {
+      if (typeof JSZip === 'undefined') throw new Error('Shapefile ZIP library did not load. Check your connection.');
+      const ring = coordinates.map(p => [Number(p[0]), Number(p[1])]);
+      let signed = 0;
+      for (let i=0; i<ring.length-1; i++) signed += ring[i][0]*ring[i+1][1] - ring[i+1][0]*ring[i][1];
+      if (signed > 0) ring.reverse(); // clockwise exterior in XY
+      const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
+      const bbox = [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
+      const contentBytes = 48 + 16 * ring.length;
+      const shp = new ArrayBuffer(100 + 8 + contentBytes), shx = new ArrayBuffer(108);
+      function header(buffer, bytes) {
+        const v = new DataView(buffer);
+        v.setInt32(0,9994,false); v.setInt32(24,bytes/2,false);
+        v.setInt32(28,1000,true); v.setInt32(32,5,true);
+        bbox.forEach((b,i)=>v.setFloat64(36+i*8,b,true));
+        return v;
+      }
+      const v=header(shp,shp.byteLength), x=header(shx,shx.byteLength);
+      v.setInt32(100,1,false); v.setInt32(104,contentBytes/2,false);
+      v.setInt32(108,5,true);
+      bbox.forEach((b,i)=>v.setFloat64(112+i*8,b,true));
+      v.setInt32(144,1,true); v.setInt32(148,ring.length,true); v.setInt32(152,0,true);
+      ring.forEach((p,i)=>{v.setFloat64(156+i*16,p[0],true);v.setFloat64(164+i*16,p[1],true);});
+      x.setInt32(100,50,false);x.setInt32(104,contentBytes/2,false);
+      // DBase III, single 80-character NAME field.
+      const dbf = new Uint8Array(65 + 81 + 1);
+      const d = new DataView(dbf.buffer), now = new Date();
+      dbf[0]=3;dbf[1]=now.getFullYear()-1900;dbf[2]=now.getMonth()+1;dbf[3]=now.getDate();
+      d.setUint32(4,1,true); d.setUint16(8,65,true); d.setUint16(10,81,true);
+      [...'NAME'].forEach((c,i)=>dbf[32+i]=c.charCodeAt(0));
+      dbf[43]='C'.charCodeAt(0);dbf[48]=80;dbf[64]=13;
+      dbf[65]=32;
+      const latinName = name.normalize('NFKD').replace(/[^\x20-\x7e]/g,'_').slice(0,80).padEnd(80,' ');
+      for(let i=0;i<80;i++)dbf[66+i]=latinName.charCodeAt(i);
+      dbf[146]=26;
+      const wkt='GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]';
+      const base=(name.replace(/[^a-z0-9_-]+/gi,'_').slice(0,60)||'Shape');
+      const zip=new JSZip();
+      zip.file(base+'.shp',shp);zip.file(base+'.shx',shx);zip.file(base+'.dbf',dbf);zip.file(base+'.prj',wkt);
+      return zip.generateAsync({type:'blob',compression:'DEFLATE'});
+    }
+    // --- End created polygon layers ---------------------------------------------
 
     function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null, sourceData = null) {
       const id = String(nextId++);
