@@ -264,7 +264,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.16</span>
+      <span>Version 1.6.17</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -2227,7 +2227,7 @@
           button.disabled = true;
           const blob = await polygonShapefileZip(rec.name, rec.sourceData.geometry.coordinates[0]);
           const filename = (rec.name.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 60) || 'Shape') + '.zip';
-          downloadBlob(blob, filename);
+          downloadExportFile({ blob, filename });
         } catch (err) { alert(err.message || 'Shapefile export failed.'); }
         finally { button.disabled = false; }
       }
