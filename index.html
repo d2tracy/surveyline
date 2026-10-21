@@ -134,6 +134,9 @@
     .export-field label { margin-bottom: 8px; }
     .export-field .survey-area-select, .export-field .survey-name-input { width: 100%; }
     .export-note { font-size: 11px; color: #678494; line-height: 1.45; margin: 13px 0 0; }
+    .export-summary-pdf { display: block; width: 100%; border: 1px solid #ee9854; background: white; color: #a65419; border-radius: 7px; font-size: 13px; font-weight: 750; padding: 11px 13px; margin-top: 14px; }
+    .export-summary-pdf:hover:not(:disabled) { background: #fff6ee; }
+    .export-summary-pdf:disabled { opacity: .45; cursor: not-allowed; }
     .export-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; margin-top: 20px; }
     .export-button { width: 100%; border: none; border-radius: 7px; padding: 12px 9px; font-size: 13px; font-weight: 750; background: #ee9854; color: #082b3f; }
     .export-button:hover { background: #f6ad71; }
@@ -233,7 +236,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.11</span>
+      <span>Version 1.6.12</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -428,7 +431,7 @@
         <h2 id="exportDialogTitle">Export Survey Lines</h2>
         <button id="closeExportModal" class="survey-close" type="button" aria-label="Close Export Survey Lines window">×</button>
       </div>
-      <p class="export-description">Save the remaining lines from a planned survey as a GPX track file or KML line file.</p>
+      <p class="export-description">Export survey lines as GPX/KML, save the visible map as a georeferenced TIFF, or download a survey-plan summary PDF.</p>
       <div class="export-field">
         <label for="exportPlanSelect">Line Plan</label>
         <select id="exportPlanSelect" class="survey-area-select">
@@ -440,8 +443,10 @@
         <select id="exportFormat" class="survey-area-select">
           <option value="gpx">GPX (.gpx)</option>
           <option value="kml">KML (.kml)</option>
+          <option value="tif">Export view as GeoTIFF (.tif)</option>
         </select>
       </div>
+      <button id="exportPlanSummaryPdf" type="button" class="export-summary-pdf">Export Survey Plan Summary (PDF)</button>
       <div class="export-field">
         <label for="exportFileName">File Name</label>
         <input id="exportFileName" class="survey-name-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="Line Plan">
@@ -452,7 +457,7 @@
         <button class="export-button" id="saveSurveyFile" type="button">Save As…</button>
         <button class="export-button secondary" id="downloadSurveyFile" type="button">Download</button>
       </div>
-      <p class="export-note">Save As… lets you choose a folder and file name in supported browsers (including Chrome on desktop). Download uses your browser's normal download location or prompt.</p>
+      <p class="export-note">Save As… lets you choose a folder and file name in supported browsers (including Chrome on desktop). Download uses your browser's normal download location or prompt. GeoTIFF captures the visible map content (not the controls or floating legend) in EPSG:3857.</p>
     </section>
   </div>
 
@@ -462,6 +467,7 @@
   <script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js"></script>
   <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js"></script>
   <script src="https://unpkg.com/georaster-layer-for-leaflet@4.1.2/dist/v3/webpack/bundle/georaster-layer-for-leaflet.min.js"></script>
+  <script src="https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script>
     'use strict';
 
@@ -496,6 +502,7 @@
     }, { capture: true, passive: false });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
+      crossOrigin: 'anonymous', // Makes visible tiles eligible for client-side map export when permitted by their server.
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     L.control.scale({ imperial: false }).addTo(map);
@@ -722,20 +729,38 @@
       return { lineCount, turns, totalMeters, lineMinutes, turningMinutes,
         totalMinutes: lineMinutes + turningMinutes };
     }
+    const planStatsFields = [
+      ['Number of lines', 'planStatsLines'],
+      ['Number of turns', 'planStatsTurns'],
+      ['Survey distance traveled', 'planStatsDistance'],
+      ['Survey speed', 'planStatsSpeed'],
+      ['Turn time', 'planStatsTurnTime'],
+      ['Time surveying lines', 'planStatsRunning'],
+      ['Time spent turning', 'planStatsTurning'],
+      ['Estimated survey time', 'planStatsTotal']
+    ];
+    const planStatsNote = 'Estimated time = line distance / (speed x 1,852 m/h per knot) + number of turns x turn time. One turn is assumed between consecutive lines; extra transit, deployment and recovery are excluded.';
+    function getPlanSummaryRows(record) {
+      const stats = calculatePlanTime(record);
+      return [
+        String(stats.lineCount),
+        String(stats.turns),
+        `${(stats.totalMeters / 1000).toFixed(2)} km`,
+        Number.isFinite(record.speedKnots) ? `${record.speedKnots} knots` : 'Not specified',
+        Number.isFinite(record.turnMinutes) ? `${record.turnMinutes} min` : 'Not specified',
+        formatSurveyMinutes(stats.lineMinutes),
+        formatSurveyMinutes(stats.turningMinutes),
+        formatSurveyMinutes(stats.totalMinutes)
+      ];
+    }
     function refreshPlanStatsPopup() {
       const record = plannedRecords.get(activePlanStatsId);
       if (!record) { closePlanStatsModal(); return; }
-      const stats = calculatePlanTime(record);
-      const label = (id, text) => { document.getElementById(id).textContent = text; };
-      label('planStatsName', record.name);
-      label('planStatsLines', String(stats.lineCount));
-      label('planStatsTurns', String(stats.turns));
-      label('planStatsDistance', `${(stats.totalMeters / 1000).toFixed(2)} km`);
-      label('planStatsSpeed', Number.isFinite(record.speedKnots) ? `${record.speedKnots} knots` : 'Not specified');
-      label('planStatsTurnTime', Number.isFinite(record.turnMinutes) ? `${record.turnMinutes} min` : 'Not specified');
-      label('planStatsRunning', formatSurveyMinutes(stats.lineMinutes));
-      label('planStatsTurning', formatSurveyMinutes(stats.turningMinutes));
-      label('planStatsTotal', formatSurveyMinutes(stats.totalMinutes));
+      document.getElementById('planStatsName').textContent = record.name;
+      const values = getPlanSummaryRows(record);
+      planStatsFields.forEach(([_, id], i) => {
+        document.getElementById(id).textContent = values[i];
+      });
     }
     function openPlanStatsModal(planId) {
       if (!plannedRecords.has(planId)) return;
@@ -770,6 +795,7 @@
     const exportMessage = document.getElementById('exportMessage');
     const saveSurveyFileBtn = document.getElementById('saveSurveyFile');
     const downloadSurveyFileBtn = document.getElementById('downloadSurveyFile');
+    const exportPlanSummaryPdfBtn = document.getElementById('exportPlanSummaryPdf');
 
 
     // Only shapefile ZIP imports appear here; GeoJSON and TIFF layers do not.
@@ -1488,16 +1514,32 @@
     document.getElementById('clearPlanned').addEventListener('click', () => {
       for (const id of Array.from(plannedRecords.keys())) removeSurveyPlan(id);
     });
-    // --- Survey-plan GPX / KML export -------------------------------------------
-    // Browser-only export: no survey data is sent to a server.
+    // --- Survey-plan exports: vector, visible map GeoTIFF and summary PDF ---
     function exportStem(value) {
       return (String(value || '').trim()
-        .replace(/\.(?:gpx|kml)$/i, '')
+        .replace(/\.(?:gpx|kml|tif|tiff|pdf)$/i, '')
         .replace(/[\x00-\x1f\x7f<>:"/\\|?*]+/g, '_')
         .replace(/[.\s]+$/g, '')
         .slice(0, 110)) || 'Line Plan';
     }
-
+    function selectedExportPlan() {
+      const plan = plannedRecords.get(exportPlanSelect.value);
+      return plan && plan.lines.size ? plan : null;
+    }
+    function refreshExportAvailability() {
+      const hasPlan = !!selectedExportPlan();
+      const mapMode = exportFormatSelect.value === 'tif';
+      // Keep the plan selector usable for the PDF button even in map-export mode.
+      exportPlanSelect.disabled = !hasPlan;
+      saveSurveyFileBtn.disabled = !mapMode && !hasPlan;
+      downloadSurveyFileBtn.disabled = !mapMode && !hasPlan;
+      exportPlanSummaryPdfBtn.disabled = !hasPlan;
+      document.getElementById('exportPlanNote').textContent = mapMode
+        ? 'Exports the currently visible map with displayed layers in EPSG:3857 (Web Mercator). Map controls and the floating color legend are excluded. Requires readable map tiles.'
+        : hasPlan
+          ? 'Only lines remaining in the plan are exported, including hidden lines. Coordinates use WGS84.'
+          : 'No planned lines available. First generate a line plan using Plan Survey.';
+    }
     function refreshExportPlanOptions() {
       const oldSelection = exportPlanSelect.value;
       exportPlanSelect.replaceChildren(new Option('Select a line plan…', ''));
@@ -1507,28 +1549,20 @@
       }
       if (plannedRecords.get(oldSelection)?.lines.size) exportPlanSelect.value = oldSelection;
       else if (exportPlanSelect.options.length > 1) exportPlanSelect.selectedIndex = 1;
-      exportPlanSelect.disabled = exportPlanSelect.options.length < 2;
-      const enabled = !exportPlanSelect.disabled;
-      saveSurveyFileBtn.disabled = !enabled;
-      downloadSurveyFileBtn.disabled = !enabled;
-      document.getElementById('exportPlanNote').textContent = enabled
-        ? 'Only lines remaining in the plan are exported, including hidden lines. Coordinates use WGS84.'
-        : 'No planned lines available. First generate a line plan using Plan Survey.';
+      refreshExportAvailability();
     }
-
     function showExportMessage(message, isError = false) {
       exportMessage.textContent = message;
       exportMessage.classList.toggle('error', isError);
       exportMessage.hidden = !message;
     }
-
     function openExportModal() {
       refreshExportPlanOptions();
-      exportFileName.value = exportStem(plannedRecords.get(exportPlanSelect.value)?.name || 'Line Plan');
+      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'SurveyLine Map' : selectedExportPlan()?.name || 'Line Plan');
       showExportMessage('');
       exportModal.hidden = false;
       document.body.style.overflow = 'hidden';
-      (exportPlanSelect.disabled ? closeExportModalBtn : exportPlanSelect).focus();
+      (exportPlanSelect.disabled ? exportFormatSelect : exportPlanSelect).focus();
     }
     function closeExportModal() {
       if (exportModal.hidden) return;
@@ -1542,10 +1576,8 @@
       if (event.target === exportModal) closeExportModal();
     });
     exportModal.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeExportModal();
-      } else if (event.key === 'Tab') {
+      if (event.key === 'Escape') { event.preventDefault(); closeExportModal(); }
+      else if (event.key === 'Tab') {
         const focusable = Array.from(exportModal.querySelectorAll('button, select, input'))
           .filter(element => !element.disabled);
         if (!focusable.length) return;
@@ -1557,10 +1589,58 @@
       }
     });
     exportPlanSelect.addEventListener('change', () => {
-      exportFileName.value = exportStem(plannedRecords.get(exportPlanSelect.value)?.name || 'Line Plan');
+      exportFileName.value = exportStem(selectedExportPlan()?.name || 'Line Plan');
+      showExportMessage('');
+      refreshExportAvailability();
+    });
+    exportFormatSelect.addEventListener('change', () => {
+      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'SurveyLine Map' : selectedExportPlan()?.name || 'Line Plan');
+      refreshExportAvailability();
       showExportMessage('');
     });
-    exportFormatSelect.addEventListener('change', () => showExportMessage(''));
+
+    // Download a PDF with the exact same statistics as the three-dot summary.
+    exportPlanSummaryPdfBtn.addEventListener('click', () => {
+      try {
+        const plan = selectedExportPlan();
+        if (!plan) throw new Error('Choose a survey plan to export its summary.');
+        if (!window.jspdf?.jsPDF) throw new Error('The PDF library did not load. Check your connection and try again.');
+        const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+        pdf.setFillColor(9, 45, 66);
+        pdf.rect(0, 0, 210, 36, 'F');
+        pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(19); pdf.text('SurveyLine | Survey Plan Summary', 16, 21);
+        pdf.setTextColor(30, 62, 81); pdf.setFontSize(12);
+        pdf.text(pdf.splitTextToSize(plan.name, 177), 16, 47);
+        const rows = getPlanSummaryRows(plan);
+        let y = 66;
+        planStatsFields.forEach(([heading], i) => {
+          if (i % 2 === 0) {
+            pdf.setFillColor(243, 248, 250);
+            pdf.rect(15, y - 7, 180, 13, 'F');
+          }
+          if (i === 7) {
+            pdf.setFillColor(253, 243, 233);
+            pdf.rect(15, y - 7, 180, 13, 'F');
+          }
+          pdf.setFontSize(10.5);
+          pdf.setTextColor(72, 101, 118); pdf.setFont('helvetica', 'normal');
+          pdf.text(heading, 19, y + 1);
+          pdf.setFont('helvetica', 'bold'); pdf.setTextColor(20, 48, 67);
+          pdf.text(rows[i], 190, y + 1, { align: 'right' });
+          y += 16;
+        });
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+        pdf.setTextColor(95, 117, 132);
+        pdf.text(pdf.splitTextToSize(planStatsNote, 175), 16, y + 7);
+        pdf.setFontSize(8.5);
+        pdf.text('Created by Declan Tracy  |  SurveyLine', 16, 286);
+        pdf.save(`${exportStem(plan.name)}-summary.pdf`);
+        showExportMessage(`Downloaded ${exportStem(plan.name)}-summary.pdf.`);
+      } catch (error) {
+        showExportMessage(error.message || 'Unable to export the PDF summary.', true);
+      }
+    });
 
     // Escape user-generated names for XML, and drop characters invalid in XML 1.0.
     function xmlText(value) {
@@ -1630,43 +1710,199 @@
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
-    downloadSurveyFileBtn.addEventListener('click', () => {
-      try {
-        const file = getSurveyExportFile();
-        downloadExportFile(file);
-        showExportMessage(`Downloaded ${file.filename} with ${file.count} survey lines.`);
-      } catch (error) {
-        showExportMessage(error.message || 'Unable to export survey lines.', true);
+    // Browser-side map capture. Capture actual Leaflet tile/canvas/SVG layers in
+    // rendering order rather than a screen screenshot with dialogs and controls.
+    // Visible GeoRasterLayer canvases and planned vector paths are both included.
+    async function visibleMapCanvas() {
+      const mapElement = map.getContainer();
+      const rect = mapElement.getBoundingClientRect();
+      const width = Math.round(rect.width), height = Math.round(rect.height);
+      if (!(width > 0 && height > 0) || width * height > 16000000) {
+        throw new Error('Map is too large or not visible; resize the browser and retry.');
       }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#dcebef'; ctx.fillRect(0, 0, width, height);
+      const panes = map.getPanes();
+      const paneOrder = ['tilePane', 'overlayPane', 'shadowPane', 'markerPane'];
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.clip();
+      for (const paneName of paneOrder) {
+        const pane = panes[paneName];
+        if (!pane) continue;
+        // Only actual map artwork: exclude popups, zoom/scale controls and legend.
+        for (const element of pane.querySelectorAll('img, canvas, svg')) {
+          if (element.closest('svg') && element.tagName.toLowerCase() !== 'svg') continue;
+          const box = element.getBoundingClientRect();
+          const x = box.left - rect.left, y = box.top - rect.top;
+          if (!box.width || !box.height || x >= width || y >= height || x + box.width <= 0 || y + box.height <= 0) continue;
+          let alpha = 1;
+          for (let parent = element; parent && parent !== mapElement; parent = parent.parentElement) {
+            const style = window.getComputedStyle(parent);
+            if (style.display === 'none' || style.visibility === 'hidden') { alpha = 0; break; }
+            alpha *= Number(style.opacity) || 0;
+          }
+          if (alpha <= 0) continue;
+          ctx.globalAlpha = alpha;
+          const tag = element.tagName.toLowerCase();
+          if (tag === 'img') {
+            if (!element.complete || !element.naturalWidth) {
+              throw new Error('A visible basemap tile has not loaded. Wait for the map to finish loading and try again.');
+            }
+            try { ctx.drawImage(element, x, y, box.width, box.height); }
+            catch (_) { throw new Error('A map tile could not be copied into the export.'); }
+          } else if (tag === 'canvas') {
+            if (element.width && element.height) ctx.drawImage(element, x, y, box.width, box.height);
+          } else if (tag === 'svg') {
+            // Leaflet vectors store style and geometry on SVG paths. Serialize
+            // them to keep stroke/fill and pan/zoom transforms together.
+            const svg = element.cloneNode(true);
+            svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const data = new XMLSerializer().serializeToString(svg);
+            const svgUrl = URL.createObjectURL(new Blob([data], { type: 'image/svg+xml' }));
+            try {
+              const image = new Image();
+              await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = () => reject(new Error('Unable to render a vector layer into the map export.'));
+                image.src = svgUrl;
+              });
+              ctx.drawImage(image, x, y, box.width, box.height);
+            } finally { URL.revokeObjectURL(svgUrl); }
+          }
+        }
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      // Required map attribution is retained within the image.
+      const credit = '© OpenStreetMap contributors';
+      ctx.font = '11px Arial, sans-serif';
+      const w = Math.ceil(ctx.measureText(credit).width) + 12;
+      ctx.fillStyle = 'rgba(255,255,255,0.88)'; ctx.fillRect(width-w-3, height-19, w, 17);
+      ctx.fillStyle = '#174961'; ctx.fillText(credit, width-w+3, height-7);
+      // Fail clearly if any third-party imagery prevented safe pixel access.
+      try { ctx.getImageData(0, 0, 1, 1); }
+      catch (_) { throw new Error('A map tile blocks pixel export (CORS). Use a basemap that permits image capture, then retry.'); }
+      return canvas;
+    }
+    // Write a baseline 8-bit RGB GeoTIFF with EPSG:3857 tie point and pixel
+    // scale. This keeps the export standalone and avoids a geospatial backend.
+    function writeGeoTIFF(canvas, xTopLeft, yTopLeft, metresPerPixelX, metresPerPixelY) {
+      const width = canvas.width, height = canvas.height;
+      if (![xTopLeft, yTopLeft, metresPerPixelX, metresPerPixelY].every(Number.isFinite) ||
+          !(metresPerPixelX > 0 && metresPerPixelY > 0)) throw new Error('Map view has invalid projected coordinates.');
+      const source = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+      const imageBytes = width * height * 3;
+      const imageStart = 8;
+      const ifdStart = imageStart + imageBytes + (imageBytes % 2);
+      const tags = [
+        [256,4,[width]], [257,4,[height]], [258,3,[8,8,8]],
+        [259,3,[1]], [262,3,[2]], [273,4,[imageStart]],
+        [274,3,[1]], [277,3,[3]], [278,4,[height]],
+        [279,4,[imageBytes]], [284,3,[1]],
+        [33550,12,[metresPerPixelX, metresPerPixelY, 0]],
+        [33922,12,[0,0,0,xTopLeft,yTopLeft,0]],
+        [34735,3,[1,1,0,4, 1024,0,1,1, 1025,0,1,1, 3072,0,1,3857, 3076,0,1,9001]]
+      ].sort((a,b) => a[0]-b[0]);
+      const ifdBytes = 2 + tags.length * 12 + 4;
+      let extraOffset = ifdStart + ifdBytes;
+      const lengths = {3:2,4:4,12:8};
+      const pointers = tags.map(([tag,type,values]) => {
+        const bytes = values.length * lengths[type];
+        if (bytes <= 4) return 0;
+        extraOffset += (type === 12 ? (8-extraOffset%8)%8 : (2-extraOffset%2)%2);
+        const off = extraOffset; extraOffset += bytes;
+        return off;
+      });
+      const buffer = new ArrayBuffer(extraOffset);
+      const view = new DataView(buffer);
+      view.setUint16(0, 0x4949, true); view.setUint16(2, 42, true);
+      view.setUint32(4, ifdStart, true);
+      for (let i=0, j=imageStart; i<source.length; i+=4) {
+        view.setUint8(j++, source[i]); view.setUint8(j++, source[i+1]); view.setUint8(j++, source[i+2]);
+      }
+      view.setUint16(ifdStart, tags.length, true);
+      const writeValue = (at, type, value) => {
+        if (type===3) view.setUint16(at, value, true);
+        else if (type===4) view.setUint32(at, value, true);
+        else if (type===12) view.setFloat64(at, value, true);
+      };
+      tags.forEach(([tag,type,values],i) => {
+        const entry=ifdStart+2+i*12;
+        view.setUint16(entry,tag,true); view.setUint16(entry+2,type,true);
+        view.setUint32(entry+4,values.length,true);
+        const offset = pointers[i];
+        if (offset) view.setUint32(entry+8,offset,true);
+        values.forEach((value,j) => writeValue(offset ? offset+j*lengths[type] : entry+8+j*lengths[type],type,value));
+      });
+      view.setUint32(ifdStart+2+tags.length*12,0,true);
+      return buffer;
+    }
+    async function getMapGeoTIFF() {
+      const canvas = await visibleMapCanvas();
+      // Leaflet's WGS84 map is displayed on a Web Mercator plane. Writing
+      // native EPSG:3857 georeferencing avoids incorrectly treating screen
+      // pixels as equally spaced WGS84 degrees (which would distort the view).
+      const topLeft = map.options.crs.project(map.containerPointToLatLng([0,0]));
+      const lowerRight = map.options.crs.project(map.containerPointToLatLng([canvas.width,canvas.height]));
+      const scaleX = (lowerRight.x - topLeft.x) / canvas.width;
+      const scaleY = (topLeft.y - lowerRight.y) / canvas.height;
+      const tiff = writeGeoTIFF(canvas, topLeft.x, topLeft.y, scaleX, scaleY);
+      return { filename: `${exportStem(exportFileName.value || 'SurveyLine Map')}.tif`,
+        blob: new Blob([tiff], {type:'image/tiff'}), mime:'image/tiff', format:'tif', count:0 };
+    }
+    async function currentExportFile() {
+      return exportFormatSelect.value === 'tif' ? getMapGeoTIFF() : getSurveyExportFile();
+    }
+    function exportFileSummary(file) {
+      return file.format === 'tif' ? `GeoTIFF map exported: ${file.filename} (EPSG:3857).`
+        : `${file.count} survey lines exported: ${file.filename}.`;
+    }
+    downloadSurveyFileBtn.addEventListener('click', async () => {
+      downloadSurveyFileBtn.disabled = true;
+      showExportMessage('Preparing export…');
+      try {
+        const file = await currentExportFile();
+        downloadExportFile(file);
+        showExportMessage(exportFileSummary(file));
+      } catch (error) {
+        showExportMessage(error.message || 'Unable to export.', true);
+      } finally { refreshExportAvailability(); }
     });
     saveSurveyFileBtn.addEventListener('click', async () => {
+      saveSurveyFileBtn.disabled = true;
+      const format = exportFormatSelect.value;
+      const mapMode = format === 'tif';
+      const stem = exportStem(exportFileName.value || (mapMode ? 'SurveyLine Map' : selectedExportPlan()?.name));
+      const mime = mapMode ? 'image/tiff' : format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
       try {
-        const file = getSurveyExportFile();
         if (typeof window.showSaveFilePicker !== 'function') {
+          showExportMessage('Preparing export…');
+          const file = await currentExportFile();
           downloadExportFile(file);
-          showExportMessage(`Save As is not supported by this browser. Downloaded ${file.filename}; your browser controls the destination folder.`);
+          showExportMessage(`Save As is unsupported here. ${exportFileSummary(file)} The browser controls the destination folder.`);
           return;
         }
-        // The chooser is opened directly in the button-click handler, with no
-        // preceding await; otherwise the browser may reject the user gesture.
+        // Open picker synchronously with the original user click. Otherwise
+        // asynchronous image capture may consume the transient user gesture.
         const handle = await window.showSaveFilePicker({
-          suggestedName: file.filename,
-          types: [{ description: file.format.toUpperCase() + ' survey lines',
-            accept: { [file.mime]: ['.' + file.format] } }]
+          suggestedName: `${stem}.${format}`,
+          types: [{ description: format.toUpperCase() + ' export', accept: { [mime]: ['.'+format] } }]
         });
+        showExportMessage('Preparing export…');
+        const file = await currentExportFile();
         const writable = await handle.createWritable();
         try {
-          await writable.write(file.blob);
-          await writable.close();
+          await writable.write(file.blob); await writable.close();
         } catch (err) {
-          try { await writable.abort(); } catch (_) { /* preserve original error */ }
+          try { await writable.abort(); } catch (_) {}
           throw err;
         }
-        showExportMessage(`Saved ${file.count} survey lines as ${handle.name || file.filename}.`);
+        showExportMessage(`Saved ${handle.name || file.filename}.`);
       } catch (error) {
-        if (error.name === 'AbortError') return; // User cancelled the OS file picker.
-        showExportMessage((error.message || 'Unable to save the file.') + ' Try Download instead.', true);
-      }
+        if (error.name !== 'AbortError') showExportMessage((error.message || 'Unable to save the file.') + ' Try Download instead.', true);
+      } finally { refreshExportAvailability(); }
     });
     // --- End survey-plan export -------------------------------------------------
 
