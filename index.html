@@ -36,6 +36,23 @@
     .survey-input-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 10px; }
     .survey-parameter-select, .survey-parameter-input { width: 100%; min-width: 0; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
     .survey-parameter-input::placeholder { color: #8399a5; }
+    /* Swath controls are dependent inputs beneath the primary Line Spacing setting. */
+    .swath-settings { min-width: 0; margin: -5px 0 0 14px; padding: 3px 0 2px 14px; border: 0; border-left: 2px solid #d9e7ed; display: grid; gap: 15px; transition: opacity .15s; }
+    .swath-settings:disabled { opacity: .43; }
+    .swath-settings:disabled input, .swath-settings:disabled select { cursor: not-allowed; background: #f0f3f5; }
+    .swath-width-row { grid-template-columns: minmax(0, 1.65fr) minmax(0, .85fr); }
+    .survey-input-unit { position: relative; }
+    .survey-input-unit input { padding-right: 32px; }
+    .survey-input-unit span { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); font-weight: 700; color: #5d7988; pointer-events: none; }
+    .swath-settings:disabled .survey-input-unit span { color: #8ea3ad; }
+    .swath-calculation-inputs { border-radius: 7px; background: #f4f8fa; border: 1px solid #dbe7ed; padding: 10px; display: grid; gap: 10px; }
+    .swath-calculation-inputs[hidden] { display: none; }
+    .swath-calculation-inputs label { font-weight: 600; font-size: 12px; margin-bottom: 5px; }
+    .swath-calculation-inputs .survey-parameter-input { padding: 9px 10px; }
+    .swath-calculation-inputs .survey-hint { margin: 1px 0 0; color: #617c8d; }
+    .survey-parameter-input:read-only { background: #eff5f7; color: #385d70; }
+    #lineSpacingHint { margin: 5px 0 0; font-size: 11px; color: #617c8d; }
+    #lineSpacingHint[hidden] { display: none; }
     .survey-name-field { margin-top: 18px; }
     .survey-name-input { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
     .survey-name-input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
@@ -183,7 +200,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.6</span>
+      <span>Version 1.6.7</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -257,32 +274,52 @@
       </div>
       <div class="survey-parameters" aria-label="Survey parameters">
         <div class="survey-field">
-          <label for="swathWidthMode">Swath Width</label>
-          <div class="survey-input-row">
-            <select id="swathWidthMode" class="survey-parameter-select" aria-label="Swath Width option">
-              <option value="none">None</option>
-            </select>
-            <input id="swathWidthValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Swath Width manual value">
-          </div>
-        </div>
-        <div class="survey-field">
-          <label for="swathOverlapMode">Swath overlap</label>
-          <div class="survey-input-row">
-            <select id="swathOverlapMode" class="survey-parameter-select" aria-label="Swath overlap option">
-              <option value="none">None</option>
-            </select>
-            <input id="swathOverlapValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Swath overlap manual value">
-          </div>
-        </div>
-        <div class="survey-field">
           <label for="lineSpacingMode">Line spacing</label>
           <div class="survey-input-row">
-            <select id="lineSpacingMode" class="survey-parameter-select" aria-label="Line spacing option">
-              <option value="none">None</option>
+            <select id="lineSpacingMode" class="survey-parameter-select" aria-label="Line spacing method">
+              <option value="manual">Manual</option>
+              <option value="swath">Calculate from swath</option>
             </select>
-            <input id="lineSpacingValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Line spacing manual value">
+            <input id="lineSpacingValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter value (m)" aria-label="Line spacing in metres">
           </div>
+          <p id="lineSpacingHint" hidden>Spacing (m) = swath width × (1 − overlap ÷ 100).</p>
         </div>
+        <fieldset id="swathSettings" class="swath-settings" aria-label="Swath settings for automatic line spacing" disabled>
+          <div class="survey-field">
+            <label for="swathWidthMode">Swath Width</label>
+            <div class="survey-input-row swath-width-row">
+              <select id="swathWidthMode" class="survey-parameter-select" aria-label="Swath width method">
+                <option value="manual">Manual</option>
+                <option value="depthAngles">Calculate from depth + beam angles</option>
+              </select>
+              <input id="swathWidthValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="Metres" aria-label="Swath width in metres">
+            </div>
+          </div>
+          <div id="swathCalculationInputs" class="swath-calculation-inputs" hidden>
+            <div>
+              <label for="swathDepthValue">Water depth (m)</label>
+              <input id="swathDepthValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 30" aria-label="Water depth in metres">
+            </div>
+            <div class="survey-input-row">
+              <div>
+                <label for="portBeamAngleValue">Port angle (°)</label>
+                <input id="portBeamAngleValue" class="survey-parameter-input" type="number" min="0" max="89.9" step="any" inputmode="decimal" placeholder="From vertical" aria-label="Port beam angle from vertical in degrees">
+              </div>
+              <div>
+                <label for="starboardBeamAngleValue">Starboard angle (°)</label>
+                <input id="starboardBeamAngleValue" class="survey-parameter-input" type="number" min="0" max="89.9" step="any" inputmode="decimal" placeholder="From vertical" aria-label="Starboard beam angle from vertical in degrees">
+              </div>
+            </div>
+            <p class="survey-hint">Approximate flat-bottom swath: depth × (tan(port angle) + tan(starboard angle)). Angles are measured outward from vertical.</p>
+          </div>
+          <div class="survey-field">
+            <label for="swathOverlapValue">Swath overlap</label>
+            <div class="survey-input-unit">
+              <input id="swathOverlapValue" class="survey-parameter-input" type="number" min="0" max="99.999" step="any" inputmode="decimal" placeholder="Enter overlap" aria-label="Swath overlap percentage">
+              <span aria-hidden="true">%</span>
+            </div>
+          </div>
+        </fieldset>
         <div class="survey-field">
           <label for="lineOrientationMode">Line Orientation</label>
           <div class="survey-input-row">
@@ -496,6 +533,80 @@
     const drawSurveyBtn = document.getElementById('drawSurveyLines');
     const surveyErrorEl = document.getElementById('surveyError');
     const linePlanNameEl = document.getElementById('linePlanName');
+    const lineSpacingModeEl = document.getElementById('lineSpacingMode');
+    const lineSpacingValueEl = document.getElementById('lineSpacingValue');
+    const lineSpacingHintEl = document.getElementById('lineSpacingHint');
+    const swathSettingsEl = document.getElementById('swathSettings');
+    const swathWidthModeEl = document.getElementById('swathWidthMode');
+    const swathWidthValueEl = document.getElementById('swathWidthValue');
+    const swathOverlapValueEl = document.getElementById('swathOverlapValue');
+    const swathCalculationInputsEl = document.getElementById('swathCalculationInputs');
+    const swathDepthValueEl = document.getElementById('swathDepthValue');
+    const portBeamAngleValueEl = document.getElementById('portBeamAngleValue');
+    const starboardBeamAngleValueEl = document.getElementById('starboardBeamAngleValue');
+    let manualSpacingText = lineSpacingValueEl.value;
+    let manualSwathText = swathWidthValueEl.value;
+    let calculatedSpacingMetres = NaN;
+
+    function readOptionalNumber(field) {
+      return field.value.trim() === '' ? NaN : Number(field.value);
+    }
+    function validBeamAngle(degrees) {
+      return Number.isFinite(degrees) && degrees >= 0 && degrees < 90;
+    }
+    function computeSwathWidthMetres() {
+      if (swathWidthModeEl.value === 'manual') return readOptionalNumber(swathWidthValueEl);
+      const depth = readOptionalNumber(swathDepthValueEl);
+      const port = readOptionalNumber(portBeamAngleValueEl);
+      const starboard = readOptionalNumber(starboardBeamAngleValueEl);
+      if (!(depth > 0) || !validBeamAngle(port) || !validBeamAngle(starboard)) return NaN;
+      return depth * (Math.tan(port * Math.PI / 180) + Math.tan(starboard * Math.PI / 180));
+    }
+    function displayMetres(value) {
+      return Number.isFinite(value) && value > 0 ? String(Number(value.toFixed(3))) : '';
+    }
+    function updateSwathCalculation() {
+      const width = computeSwathWidthMetres();
+      if (swathWidthModeEl.value === 'depthAngles') swathWidthValueEl.value = displayMetres(width);
+      const overlap = readOptionalNumber(swathOverlapValueEl);
+      calculatedSpacingMetres = width > 0 && Number.isFinite(overlap) && overlap >= 0 && overlap < 100
+        ? width * (1 - overlap / 100) : NaN;
+      if (lineSpacingModeEl.value === 'swath') lineSpacingValueEl.value = displayMetres(calculatedSpacingMetres);
+    }
+    function updateSpacingMode() {
+      const calculate = lineSpacingModeEl.value === 'swath';
+      swathSettingsEl.disabled = !calculate;
+      lineSpacingHintEl.hidden = !calculate;
+      lineSpacingValueEl.readOnly = calculate;
+      lineSpacingValueEl.placeholder = calculate ? 'Calculated (m)' : 'Enter value (m)';
+      if (!calculate) {
+        lineSpacingValueEl.value = manualSpacingText;
+      } else {
+        updateSwathCalculation();
+      }
+    }
+    function updateSwathWidthMode() {
+      const calculateWidth = swathWidthModeEl.value === 'depthAngles';
+      swathCalculationInputsEl.hidden = !calculateWidth;
+      swathWidthValueEl.readOnly = calculateWidth;
+      swathWidthValueEl.placeholder = calculateWidth ? 'Calculated (m)' : 'Metres';
+      if (!calculateWidth) swathWidthValueEl.value = manualSwathText;
+      updateSwathCalculation();
+    }
+    lineSpacingValueEl.addEventListener('input', () => {
+      if (lineSpacingModeEl.value === 'manual') manualSpacingText = lineSpacingValueEl.value;
+    });
+    swathWidthValueEl.addEventListener('input', () => {
+      if (swathWidthModeEl.value === 'manual') manualSwathText = swathWidthValueEl.value;
+      updateSwathCalculation();
+    });
+    lineSpacingModeEl.addEventListener('change', updateSpacingMode);
+    swathWidthModeEl.addEventListener('change', updateSwathWidthMode);
+    [swathOverlapValueEl, swathDepthValueEl, portBeamAngleValueEl, starboardBeamAngleValueEl].forEach(field => {
+      field.addEventListener('input', updateSwathCalculation);
+    });
+    updateSpacingMode();
+    updateSwathWidthMode();
     const plannedLinesEl = document.getElementById('plannedLines');
     const plannedEmpty = document.getElementById('plannedEmpty');
     const plannedRecords = new Map();
@@ -529,6 +640,7 @@
 
     function openSurveyModal() {
       updateSurveyAreaOptions();
+      updateSpacingMode();
       surveyErrorEl.hidden = true;
       surveyModal.hidden = false;
       document.body.style.overflow = 'hidden';
@@ -953,11 +1065,15 @@
       try {
         const record = records.get(surveyAreaSelect.value);
         if (!record || record.sourceFormat !== 'shapefile') throw new Error('Select an uploaded shapefile as the Survey Area.');
-        const spacingInput = document.getElementById('lineSpacingValue');
         const orientationInput = document.getElementById('lineOrientationValue');
-        const spacing = spacingInput.value.trim() === '' ? NaN : Number(spacingInput.value);
+        // Use the full-precision value in calculated mode; the textbox is only a rounded display.
+        updateSwathCalculation();
+        const spacing = lineSpacingModeEl.value === 'swath'
+          ? calculatedSpacingMetres : readOptionalNumber(lineSpacingValueEl);
         const bearing = orientationInput.value.trim() === '' ? NaN : Number(orientationInput.value);
-        if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Enter a line spacing greater than zero, in metres.');
+        if (!Number.isFinite(spacing) || spacing <= 0) throw new Error(lineSpacingModeEl.value === 'swath'
+          ? 'Enter a valid swath width and overlap (0% to less than 100%) to calculate line spacing.'
+          : 'Enter a line spacing greater than zero, in metres.');
         if (!Number.isFinite(bearing) || bearing < 0 || bearing >= 360) throw new Error('Enter a line orientation from 0° to less than 360° (clockwise from North).');
         const planName = linePlanNameEl.value.trim().slice(0, 80) || 'Line Plan';
         const result = generateSurveyGeometry(record.sourceData, spacing, bearing);
