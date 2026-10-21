@@ -44,6 +44,18 @@
     .survey-input-unit { position: relative; }
     .survey-input-unit input { padding-right: 32px; }
     .survey-input-unit span { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); font-weight: 700; color: #5d7988; pointer-events: none; }
+    .survey-input-unit .survey-parameter-input { width: 100%; }
+    .survey-input-unit .survey-parameter-input::-webkit-inner-spin-button { margin-right: 15px; }
+    .plan-stats-dialog { width: min(430px, 100%); }
+    .plan-stats-subtitle { margin: -9px 0 17px; color: #617c8d; font-size: 13px; overflow-wrap: anywhere; }
+    .plan-stats-table { margin: 0; border: 1px solid #dfe8ed; border-radius: 8px; overflow: hidden; }
+    .plan-stats-row { padding: 12px; display: flex; justify-content: space-between; gap: 12px; font-size: 13px; border-bottom: 1px solid #e6eef1; }
+    .plan-stats-row:last-child { border-bottom: 0; }
+    .plan-stats-row dt { color: #5b7987; }
+    .plan-stats-row dd { margin: 0; font-weight: 700; text-align: right; color: #17334b; font-variant-numeric: tabular-nums; }
+    .plan-stats-row.total { background: #fdf3e9; }
+    .plan-stats-row.total dd { color: #a3531a; }
+    .plan-stats-note { margin: 14px 0 0; font-size: 12px; color: #617c8d; line-height: 1.45; }
     .swath-settings:disabled .survey-input-unit span { color: #8ea3ad; }
     .swath-calculation-inputs { border-radius: 7px; background: #f4f8fa; border: 1px solid #dbe7ed; padding: 10px; display: grid; gap: 10px; }
     .swath-calculation-inputs[hidden] { display: none; }
@@ -92,7 +104,8 @@
     .planned-item-info { min-width: 0; flex: 1; }
     .planned-name { display: block; border: 0; padding: 0; background: transparent; text-align: left; width: 100%; color: #17334b; font-size: 12px; font-weight: 750; overflow-wrap: anywhere; }
     .planned-item button:focus-visible, .planned-line-row input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
-    .planned-item .planned-expand, .planned-item .planned-zoom, .planned-item .planned-remove { border: 0; border-radius: 5px; background: #eaf3f6; color: #2a657a; padding: 5px 6px; flex-shrink: 0; }
+    .planned-item .planned-expand, .planned-item .planned-zoom, .planned-item .planned-remove, .planned-item .planned-stats { border: 0; border-radius: 5px; background: #eaf3f6; color: #2a657a; padding: 5px 6px; flex-shrink: 0; }
+    .planned-item .planned-stats { font-size: 17px; line-height: 1; width: 25px; height: 25px; }
     .planned-item .planned-expand { width: 23px; padding: 4px 2px; font-size: 14px; }
     .planned-item .planned-expand[aria-expanded="true"] { background: #d8eaf2; }
     .planned-details { border-top: 1px solid #e2ecf0; background: #f9fcfd; padding: 10px 7px; }
@@ -220,7 +233,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.10</span>
+      <span>Version 1.6.11</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -353,12 +366,17 @@
           </div>
         </div>
         <div class="survey-field">
-          <label for="surveySpeedMode">Survey Speed</label>
-          <div class="survey-input-row">
-            <select id="surveySpeedMode" class="survey-parameter-select" aria-label="Survey Speed option">
-              <option value="none">None</option>
-            </select>
-            <input id="surveySpeedValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Survey Speed manual value">
+          <label for="surveySpeedValue">Survey Speed</label>
+          <div class="survey-input-unit">
+            <input id="surveySpeedValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter speed" aria-label="Survey speed in knots">
+            <span aria-hidden="true">knots</span>
+          </div>
+        </div>
+        <div class="survey-field">
+          <label for="turnTimeValue">Turn time</label>
+          <div class="survey-input-unit">
+            <input id="turnTimeValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="Enter turn time" aria-label="Time per turn in minutes">
+            <span aria-hidden="true">min</span>
           </div>
         </div>
       </div>
@@ -380,6 +398,27 @@
       <p id="depthResult" class="depth-result" role="status" aria-live="polite" hidden></p>
       <button id="applyCalculatedDepth" class="survey-draw depth-apply" type="button" hidden>Input water depth</button>
       <p class="depth-warning">This is a pixel-centre mean, not an area-weighted or vertical-datum-corrected sounding.</p>
+    </section>
+  </div>
+
+  <div class="survey-modal-backdrop" id="planStatsModal" hidden>
+    <section class="survey-dialog plan-stats-dialog" role="dialog" aria-modal="true" aria-labelledby="planStatsTitle">
+      <div class="survey-dialog-head">
+        <h2 id="planStatsTitle">Survey Plan Summary</h2>
+        <button id="closePlanStatsModal" class="survey-close" type="button" aria-label="Close survey plan summary">×</button>
+      </div>
+      <p class="plan-stats-subtitle" id="planStatsName"></p>
+      <dl class="plan-stats-table">
+        <div class="plan-stats-row"><dt>Number of lines</dt><dd id="planStatsLines"></dd></div>
+        <div class="plan-stats-row"><dt>Number of turns</dt><dd id="planStatsTurns"></dd></div>
+        <div class="plan-stats-row"><dt>Survey distance traveled</dt><dd id="planStatsDistance"></dd></div>
+        <div class="plan-stats-row"><dt>Survey speed</dt><dd id="planStatsSpeed"></dd></div>
+        <div class="plan-stats-row"><dt>Turn time</dt><dd id="planStatsTurnTime"></dd></div>
+        <div class="plan-stats-row"><dt>Time surveying lines</dt><dd id="planStatsRunning"></dd></div>
+        <div class="plan-stats-row"><dt>Time spent turning</dt><dd id="planStatsTurning"></dd></div>
+        <div class="plan-stats-row total"><dt>Estimated survey time</dt><dd id="planStatsTotal"></dd></div>
+      </dl>
+      <p class="plan-stats-note">Estimated time = line distance ÷ (speed × 1,852 m/h per knot) + number of turns × turn time. One turn is assumed between consecutive lines; extra transit, deployment and recovery are excluded.</p>
     </section>
   </div>
 
@@ -658,6 +697,70 @@
     const plannedEmpty = document.getElementById('plannedEmpty');
     const plannedRecords = new Map();
     let nextPlanId = 1;
+    const surveySpeedValueEl = document.getElementById('surveySpeedValue');
+    const turnTimeValueEl = document.getElementById('turnTimeValue');
+    const planStatsModal = document.getElementById('planStatsModal');
+    const closePlanStatsModalBtn = document.getElementById('closePlanStatsModal');
+    let activePlanStatsId = null;
+
+    function formatSurveyMinutes(minutes) {
+      if (!Number.isFinite(minutes) || minutes < 0) return 'Not calculated';
+      const rounded = Math.round(minutes);
+      const hours = Math.floor(rounded / 60);
+      const mins = rounded % 60;
+      return hours ? `${hours} h ${mins} min` : `${mins} min`;
+    }
+    function calculatePlanTime(record) {
+      const lineCount = record.lines.size;
+      const turns = Math.max(0, lineCount - 1);
+      const totalMeters = Array.from(record.lines.values()).reduce((sum, line) => sum + line.lengthMeters, 0);
+      const speed = record.speedKnots;
+      const turnTime = record.turnMinutes;
+      const hasInputs = Number.isFinite(speed) && speed > 0 && Number.isFinite(turnTime) && turnTime >= 0;
+      const lineMinutes = hasInputs ? totalMeters / (speed * 1852) * 60 : NaN;
+      const turningMinutes = hasInputs ? turns * turnTime : NaN;
+      return { lineCount, turns, totalMeters, lineMinutes, turningMinutes,
+        totalMinutes: lineMinutes + turningMinutes };
+    }
+    function refreshPlanStatsPopup() {
+      const record = plannedRecords.get(activePlanStatsId);
+      if (!record) { closePlanStatsModal(); return; }
+      const stats = calculatePlanTime(record);
+      const label = (id, text) => { document.getElementById(id).textContent = text; };
+      label('planStatsName', record.name);
+      label('planStatsLines', String(stats.lineCount));
+      label('planStatsTurns', String(stats.turns));
+      label('planStatsDistance', `${(stats.totalMeters / 1000).toFixed(2)} km`);
+      label('planStatsSpeed', Number.isFinite(record.speedKnots) ? `${record.speedKnots} knots` : 'Not specified');
+      label('planStatsTurnTime', Number.isFinite(record.turnMinutes) ? `${record.turnMinutes} min` : 'Not specified');
+      label('planStatsRunning', formatSurveyMinutes(stats.lineMinutes));
+      label('planStatsTurning', formatSurveyMinutes(stats.turningMinutes));
+      label('planStatsTotal', formatSurveyMinutes(stats.totalMinutes));
+    }
+    function openPlanStatsModal(planId) {
+      if (!plannedRecords.has(planId)) return;
+      activePlanStatsId = planId;
+      refreshPlanStatsPopup();
+      planStatsModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      closePlanStatsModalBtn.focus();
+    }
+    function closePlanStatsModal() {
+      if (planStatsModal.hidden) return;
+      planStatsModal.hidden = true;
+      document.body.style.overflow = '';
+      const previousPlan = plannedRecords.get(activePlanStatsId);
+      activePlanStatsId = null;
+      if (previousPlan?.element?.isConnected) previousPlan.element.querySelector('.planned-stats')?.focus();
+    }
+    closePlanStatsModalBtn.addEventListener('click', closePlanStatsModal);
+    planStatsModal.addEventListener('click', event => {
+      if (event.target === planStatsModal) closePlanStatsModal();
+    });
+    planStatsModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePlanStatsModal(); }
+      if (event.key === 'Tab') { event.preventDefault(); closePlanStatsModalBtn.focus(); }
+    });
     const exportModal = document.getElementById('exportModal');
     const exportSurveyBtn = document.getElementById('exportSurveyBtn');
     const closeExportModalBtn = document.getElementById('closeExportModal');
@@ -1184,6 +1287,7 @@
       record.details.querySelector('.planned-summary').textContent =
         `${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
       record.element.querySelector('.planned-name').title = `${record.name} (${record.sourceName})`;
+      if (!planStatsModal.hidden && activePlanStatsId === record.id) refreshPlanStatsPopup();
     }
 
     function refreshPlanSelection(record) {
@@ -1214,6 +1318,7 @@
     function removeSurveyPlan(id) {
       const record = plannedRecords.get(id);
       if (!record) return;
+      if (activePlanStatsId === id) closePlanStatsModal();
       map.removeLayer(record.layer);
       record.element.remove();
       plannedRecords.delete(id);
@@ -1237,7 +1342,7 @@
       refreshPlanSelection(record);
     }
 
-    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees) {
+    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes) {
       const planNumber = nextPlanId++;
       const id = String(planNumber);
       const lineEntries = new Map();
@@ -1266,6 +1371,7 @@
           <button type="button" class="planned-expand" title="Expand lines" aria-label="Expand lines" aria-expanded="false">▸</button>
           <input class="planned-visible" type="checkbox" checked aria-label="Show or hide this survey plan">
           <div class="planned-item-info"><button class="planned-name" type="button"></button></div>
+          <button type="button" class="planned-stats" title="Survey plan summary" aria-label="Survey plan summary" aria-haspopup="dialog" aria-controls="planStatsModal">⋮</button>
           <button type="button" class="planned-zoom" title="Zoom to plan" aria-label="Zoom to plan">◎</button>
           <button type="button" class="planned-remove" title="Remove plan" aria-label="Remove plan">×</button>
         </div>
@@ -1292,7 +1398,7 @@
         lineList.append(row);
       }
       const record = { id, name, sourceName, spacing, bearing: bearingDegrees,
-        layer, bounds, lines: lineEntries, element: item, details };
+        speedKnots, turnMinutes, layer, bounds, lines: lineEntries, element: item, details };
       plannedRecords.set(id, record);
       plannedLinesEl.append(item);
       refreshPlanSummary(record);
@@ -1317,9 +1423,23 @@
           ? 'Enter a valid swath width and overlap (0% to less than 100%) to calculate line spacing.'
           : 'Enter a line spacing greater than zero, in metres.');
         if (!Number.isFinite(bearing) || bearing < 0 || bearing >= 360) throw new Error('Enter a line orientation from 0° to less than 360° (clockwise from North).');
+        // Timing inputs are optional for drawing a plan. If supplied, both must be valid.
+        const speedText = surveySpeedValueEl.value.trim();
+        const turnText = turnTimeValueEl.value.trim();
+        if ((speedText === '') !== (turnText === '')) {
+          throw new Error('Enter both survey speed (knots) and turn time (minutes), or leave both blank to plan without a time estimate.');
+        }
+        const speedKnots = speedText === '' ? NaN : Number(speedText);
+        const turnMinutes = turnText === '' ? NaN : Number(turnText);
+        if (speedText !== '' && (!Number.isFinite(speedKnots) || speedKnots <= 0)) {
+          throw new Error('Survey speed must be greater than 0 knots.');
+        }
+        if (turnText !== '' && (!Number.isFinite(turnMinutes) || turnMinutes < 0)) {
+          throw new Error('Turn time must be zero or more minutes.');
+        }
         const planName = linePlanNameEl.value.trim().slice(0, 80) || 'Line Plan';
         const result = generateSurveyGeometry(record.sourceData, spacing, bearing);
-        registerSurveyPlan(record.name, planName, result, spacing, bearing);
+        registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes);
         closeSurveyModal();
       } catch (err) {
         surveyErrorEl.textContent = err.message || 'Unable to draw survey lines.';
@@ -1355,6 +1475,8 @@
         expand.textContent = next ? '▾' : '▸';
         expand.setAttribute('aria-label', next ? 'Collapse lines' : 'Expand lines');
         record.details.hidden = !next;
+      } else if (button.classList.contains('planned-stats')) {
+        openPlanStatsModal(record.id);
       } else if (button.classList.contains('planned-zoom')) {
         map.fitBounds(record.bounds.pad(0.12), { maxZoom: 15 });
       } else if (button.classList.contains('planned-remove')) {
@@ -2002,6 +2124,7 @@
         closeLayerMenus();
         closeSurveyModal();
         closeExportModal();
+        closePlanStatsModal();
       }
     });
     document.getElementById('clearAll').addEventListener('click', () => {
