@@ -33,7 +33,9 @@
     .layer-menu[hidden] { display: none; }
     .layer-menu label { display: block; font-weight: 700; color: #36566a; font-size: 11px; margin-bottom: 6px; }
     .layer-menu select { display: block; width: 100%; border: 1px solid #b8d1dc; background: white; color: #17334b; border-radius: 5px; font: inherit; font-size: 12px; padding: 8px; cursor: pointer; }
-    .layer-menu select:focus-visible, .layer button:focus-visible, .layer-menu button:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    /* Keep keyboard focus styling on buttons, but no blue ring on TIFF-type select. */
+    .layer button:focus-visible, .layer-menu button:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    .layer-menu select:focus, .layer-menu select:focus-visible { outline: none; box-shadow: none; }
     .ramp-preview { width: 100%; height: 14px; border: 1px solid #d2e0e7; border-radius: 4px; margin: 10px 0 5px; }
     .ramp-caption { font-size: 10px; color: #6d8794; display: flex; justify-content: space-between; }
     .layer-menu .invert { display: block; width: 100%; margin-top: 12px; text-align: center; font-size: 12px; padding: 9px 7px; background: #e7f2f6; color: #145671; font-weight: 650; }
@@ -48,7 +50,23 @@
     #empty { font-size: 13px; color: #78929e; padding: 12px 0; }
     #status { border-radius: 8px; background: #eff5f8; font-size: 12px; padding: 10px; line-height: 1.45; color: #456578; min-height: 39px; word-wrap: break-word; }
     #status.error { color: #9a3939; background: #fff0ee; }
+    .map-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
     #map { width: 100%; height: 100%; background: #dcebef; }
+    .map-legend { position: absolute; top: 14px; right: 14px; z-index: 1000; width: 226px; padding: 11px 12px 10px; background: rgba(255,255,255,.96); border: 1px solid #d5e4eb; border-radius: 9px; box-shadow: 0 3px 16px rgba(9,45,66,.15); font-size: 12px; }
+    .map-legend[hidden], .legend-options[hidden] { display: none; }
+    .legend-top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+    .legend-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; }
+    .legend-more { padding: 2px 7px; border: 0; border-radius: 5px; background: #eaf3f6; color: #215d74; font-size: 19px; line-height: 1.1; }
+    .legend-more:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    .legend-kind { margin: 4px 0 9px; color: #5a7d8c; font-size: 11px; text-transform: capitalize; }
+    .legend-ramp { height: 15px; border: 1px solid #d3dce3; border-radius: 3px; }
+    .legend-values { display: flex; justify-content: space-between; gap: 5px; margin-top: 5px; font-size: 11px; font-variant-numeric: tabular-nums; color: #264c5d; }
+    .legend-note { margin-top: 6px; font-size: 10px; color: #718d9a; }
+    .legend-options { position: absolute; z-index: 2; top: 36px; right: 8px; left: 8px; max-height: 230px; overflow-y: auto; background: white; border: 1px solid #ccdde5; border-radius: 6px; padding: 5px; box-shadow: 0 6px 14px rgba(9,45,66,.16); }
+    .legend-choice { display: block; text-align: left; width: 100%; border: 0; background: transparent; padding: 8px; border-radius: 4px; color: #214b60; font-size: 12px; overflow-wrap: anywhere; }
+    .legend-choice:hover, .legend-choice[aria-current="true"] { background: #e8f3f6; }
+    .legend-choice:focus-visible { outline: 2px solid #2983a1; }
+    .legend-no-layers { font-size: 11px; color: #718d9a; padding: 7px; }
     .help { padding: 12px; background: #f3f7f9; border-radius: 9px; }
     .help p { margin: 0; font-size: 12px; }
     footer { color: #8497a2; font-size: 11px; margin-top: 18px; }
@@ -58,14 +76,15 @@
       header { padding: 0 14px; }
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
       aside { order: 2; max-height: 47%; padding: 15px; border-right: 0; border-top: 1px solid #dce6eb; }
-      #map { order: 1; min-height: 53%; }
+      .map-stage { order: 1; min-height: 53%; }
+      .map-legend { top: 9px; right: 9px; width: min(212px, 65vw); }
     }
   </style>
 </head>
 <body>
   <header>
     <strong>◉ SurveyLine</strong>
-    <span>Mini GIS · Version 0.1.2</span>
+    <span>Mini GIS · Version 0.1.3</span>
   </header>
   <div class="shell">
     <aside>
@@ -96,7 +115,20 @@
         <div class="creator-credit">Webpage made and designed by <strong>Declan Tracy</strong></div>
       </footer>
     </aside>
-    <main id="map" aria-label="Interactive GIS map"></main>
+    <div class="map-stage">
+      <main id="map" aria-label="Interactive GIS map"></main>
+      <section class="map-legend" id="mapLegend" aria-label="Raster color legend" hidden>
+        <div class="legend-top">
+          <span class="legend-name" id="legendName"></span>
+          <button class="legend-more" id="legendMore" type="button" aria-label="Choose raster for legend" aria-expanded="false" title="Choose raster for legend">⋮</button>
+        </div>
+        <div class="legend-kind" id="legendKind"></div>
+        <div class="legend-ramp" id="legendRamp" aria-hidden="true"></div>
+        <div class="legend-values"><span id="legendLeft"></span><span id="legendRight"></span></div>
+        <div class="legend-note">2–98% cumulative count cut</div>
+        <div class="legend-options" id="legendOptions" hidden></div>
+      </section>
+    </div>
   </div>
 
   <!-- Pinned dependencies: no build tools needed. An internet connection is required for the libraries and basemap. -->
@@ -150,6 +182,11 @@
     const dropZone = document.getElementById('dropZone');
     const records = new Map();
     let nextId = 1;
+    // Keeps its selection until that raster is removed or set back to "None".
+    let selectedLegendId = null;
+    const legendEl = document.getElementById('mapLegend');
+    const legendOptions = document.getElementById('legendOptions');
+    const legendMore = document.getElementById('legendMore');
 
     function setStatus(message, isError = false) {
       status.textContent = message;
@@ -196,6 +233,7 @@
       layersEl.prepend(item);
       empty.style.display = 'none';
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
+      if (rasterConfig) updateMapLegend();
     }
 
     function addGeoJSON(data, filename) {
@@ -227,20 +265,74 @@
       setStatus(`Loaded ${count} shapefile layer${count === 1 ? '' : 's'} from ${file.name}.`);
     }
 
-    // Single-band raster styles use the source's first band. For multiband images,
-    // "None" preserves RGB and sidescan/backscatter use perceived RGB brightness.
-    // Bathymetry is meaningful only when the first band contains actual elevations/depths.
+    // Raster colorization and robust 2–98% statistics. The cut *clips the
+    // displayed color stretch* at percentiles; it does not discard pixels.
     const bathyStops = [
       [0, [213, 38, 45]],       // Shallow: red
       [0.2, [246, 137, 39]],
       [0.4, [252, 226, 81]],
       [0.6, [69, 185, 103]],
       [0.8, [55, 183, 223]],
-      [1, [35, 65, 168]]       // Deep: blue
+      [1, [35, 65, 168]]        // Deep: blue
     ];
 
     function clamp01(value) { return Math.max(0, Math.min(1, value)); }
     function clampByte(value) { return Math.round(clamp01(value / 255) * 255); }
+    function isValidPixel(value, noData) {
+      return typeof value === 'number' && Number.isFinite(value) &&
+        (noData == null || !Number.isFinite(noData) || value !== noData);
+    }
+    function percentile(sorted, fraction) {
+      const position = (sorted.length - 1) * fraction;
+      const low = Math.floor(position), high = Math.ceil(position);
+      return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
+    }
+    function makeLimits(sample) {
+      sample.sort((a, b) => a - b);
+      if (!sample.length) return null;
+      return { low: percentile(sample, 0.02), high: percentile(sample, 0.98), count: sample.length };
+    }
+
+    async function computeRasterStretch(georaster) {
+      // The original GeoTIFF is already decoded in memory for our <60MB files.
+      // Sample pixels evenly in 2D for quick, deterministic percentile estimates.
+      // If georaster has no in-memory pixels, request a 512px overview instead.
+      let bands = georaster.values;
+      let sampled = false;
+      if (!bands?.[0]?.length) {
+        const width = Math.min(512, georaster.width);
+        const height = Math.min(512, georaster.height);
+        bands = await georaster.getValues({ left: 0, right: 0, top: 0, bottom: 0,
+          width, height, resampleMethod: 'nearest' });
+        sampled = true;
+      }
+      const monoRows = bands?.[0];
+      if (!monoRows?.length || !monoRows[0]?.length) throw new Error('No usable raster pixel data for stretch.');
+      const rows = monoRows.length, cols = monoRows[0].length;
+      const step = Math.max(1, Math.ceil(Math.sqrt(rows * cols / 125000)));
+      sampled ||= step > 1;
+      const nodata = georaster.noDataValue == null || georaster.noDataValue === ''
+        ? null : Number(georaster.noDataValue);
+      const rgb = georaster.numberOfRasters >= 3 && bands[1] && bands[2];
+      const monoValues = [];
+      const greyValues = [];
+      for (let row = 0; row < rows; row += step) {
+        for (let col = 0; col < cols; col += step) {
+          const v = monoRows[row][col];
+          if (!isValidPixel(v, nodata)) continue;
+          monoValues.push(v);
+          if (rgb) {
+            const g = bands[1]?.[row]?.[col], b = bands[2]?.[row]?.[col];
+            if (isValidPixel(g, nodata) && isValidPixel(b, nodata)) {
+              greyValues.push(0.2126 * v + 0.7152 * g + 0.0722 * b);
+            }
+          }
+        }
+      }
+      const mono = makeLimits(monoValues);
+      if (!mono) throw new Error('Raster contains no valid pixel samples (check NoData).');
+      return { mono, grey: rgb ? makeLimits(greyValues) : null, approximate: sampled };
+    }
 
     function rainbowColor(fraction) {
       const t = clamp01(fraction);
@@ -251,85 +343,152 @@
       const w = (t - a) / (b - a);
       return `rgb(${aRgb.map((v, index) => Math.round(v + (bRgb[index] - v) * w)).join(',')})`;
     }
-
+    function bathyGradient(inverted) {
+      return 'linear-gradient(to right, ' + bathyStops.map(([position], index) => {
+        const rgb = bathyStops[inverted ? bathyStops.length - 1 - index : index][1];
+        return `rgb(${rgb.join(',')}) ${Math.round(position * 100)}%`;
+      }).join(', ') + ')';
+    }
+    function rasterGradient(config) {
+      if (config.type === 'bathymetry') return bathyGradient(config.inverted);
+      if (config.type === 'sidescan' || config.type === 'backscatter') {
+        return config.inverted ? 'linear-gradient(to right, white, black)'
+          : 'linear-gradient(to right, black, white)';
+      }
+      return config.georaster.numberOfRasters >= 3
+        ? (config.inverted ? 'linear-gradient(to right, #00ffff, #ff00ff, #ffff00)' : 'linear-gradient(to right, #ff0000, #00ff00, #0000ff)')
+        : (config.inverted ? 'linear-gradient(to right, #d2ebee, #12508a)' : 'linear-gradient(to right, #12508a, #d2ebee)');
+    }
+    function activeLimits(config) {
+      const useGrey = (config.type === 'sidescan' || config.type === 'backscatter') && config.georaster.numberOfRasters >= 3;
+      return useGrey && config.stretch.grey ? config.stretch.grey : config.stretch.mono;
+    }
+    function valueSpan(raw, low, high) {
+      return clamp01((raw - low) / ((high - low) || 1));
+    }
     function makeRasterColorFn(config) {
       const { georaster, min, max, type, inverted } = config;
       const isRgb = georaster.numberOfRasters >= 3;
-      const range = max - min || 1;
-      // Common bathymetric conventions: depth positive down, elevation negative down.
-      // When raster values include negatives, assume elevation (larger = shallower).
-      const valuesArePositiveDepths = min >= 0;
+      const nodata = georaster.noDataValue == null || georaster.noDataValue === ''
+        ? null : Number(georaster.noDataValue);
+      const limits = activeLimits(config);
+      const positiveDepths = config.stretch.mono.low >= 0;
+      const flip = fraction => inverted ? 1 - fraction : fraction;
       return values => {
-        if (!values || values[0] == null || !Number.isFinite(values[0])) return null;
+        if (!values || !isValidPixel(values[0], nodata)) return null;
         const raw = values[0];
-        const bandFraction = clamp01((raw - min) / range);
-        const flip = fraction => inverted ? 1 - fraction : fraction;
-
         if (type === 'bathymetry') {
-          // A pixel's shallow-to-deep position, regardless of the sign convention.
-          const deepFraction = valuesArePositiveDepths ? bandFraction : 1 - bandFraction;
+          const fraction = valueSpan(raw, limits.low, limits.high);
+          // If depths are negative elevations, higher values are shallower.
+          const deepFraction = positiveDepths ? fraction : 1 - fraction;
           return rainbowColor(flip(deepFraction));
         }
         if (type === 'sidescan' || type === 'backscatter') {
-          let brightness = bandFraction;
+          let brightness = raw;
           if (isRgb) {
-            const rgb = values.slice(0, 3);
-            if (rgb.some(v => v == null || !Number.isFinite(v))) return null;
-            brightness = clamp01((0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255);
+            const channels = values.slice(0, 3);
+            if (channels.some(v => !isValidPixel(v, nodata))) return null;
+            brightness = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
           }
-          const grey = Math.round(flip(brightness) * 255);
-          return `rgb(${grey},${grey},${grey})`;
+          const gray = Math.round(flip(valueSpan(brightness, limits.low, limits.high)) * 255);
+          return `rgb(${gray},${gray},${gray})`;
         }
+        // "None of these": original rendering, without percentile stretch.
         if (isRgb) {
-          const rgb = values.slice(0, 3);
-          if (rgb.some(v => v == null || !Number.isFinite(v))) return null;
-          const channels = rgb.map(v => inverted ? 255 - clampByte(v) : clampByte(v));
-          return `rgb(${channels.join(',')})`;
+          const channels = values.slice(0, 3);
+          if (channels.some(v => !isValidPixel(v, nodata))) return null;
+          return `rgb(${channels.map(v => inverted ? 255 - clampByte(v) : clampByte(v)).join(',')})`;
         }
-        // Original generic blue ramp, with optional inversion.
-        const t = flip(bandFraction);
-        return `rgb(${Math.round(18 + 192 * t)},${Math.round(80 + 155 * t)},${Math.round(138 + 100 * t)})`;
+        const fraction = flip(valueSpan(raw, min, max));
+        return `rgb(${Math.round(18 + 192 * fraction)},${Math.round(80 + 155 * fraction)},${Math.round(138 + 100 * fraction)})`;
       };
     }
+
+    function formatLegendValue(value) {
+      return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function updateMapLegend() {
+      const eligible = [...records].filter(([, rec]) => rec.rasterConfig && rec.rasterConfig.type !== 'none');
+      if (!eligible.length) {
+        selectedLegendId = null;
+        legendEl.hidden = true;
+        legendOptions.hidden = true;
+        legendMore.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      if (!eligible.some(([id]) => id === selectedLegendId)) selectedLegendId = eligible[0][0];
+      const rec = records.get(selectedLegendId);
+      const config = rec.rasterConfig;
+      const limits = activeLimits(config);
+      const positiveDepths = config.stretch.mono.low >= 0;
+      const bathy = config.type === 'bathymetry';
+      const leftValue = bathy && !positiveDepths ? limits.high : limits.low;
+      const rightValue = bathy && !positiveDepths ? limits.low : limits.high;
+      document.getElementById('legendName').textContent = rec.name;
+      document.getElementById('legendName').title = rec.name;
+      document.getElementById('legendKind').textContent = config.type;
+      document.getElementById('legendRamp').style.background = rasterGradient(config);
+      document.getElementById('legendLeft').textContent = formatLegendValue(leftValue);
+      document.getElementById('legendRight').textContent = formatLegendValue(rightValue);
+      document.querySelector('.legend-note').textContent = config.stretch.approximate
+        ? '2–98% count cut · sampled pixels' : '2–98% cumulative count cut';
+      legendOptions.replaceChildren();
+      for (const [id, record] of eligible) {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'legend-choice';
+        option.dataset.legendId = id;
+        option.textContent = record.name;
+        option.setAttribute('aria-current', String(id === selectedLegendId));
+        legendOptions.append(option);
+      }
+      legendEl.hidden = false;
+    }
+    legendMore.addEventListener('click', () => {
+      legendOptions.hidden = !legendOptions.hidden;
+      legendMore.setAttribute('aria-expanded', String(!legendOptions.hidden));
+    });
+    legendOptions.addEventListener('click', event => {
+      const button = event.target.closest('[data-legend-id]');
+      if (!button || !records.has(button.dataset.legendId)) return;
+      selectedLegendId = button.dataset.legendId;
+      legendOptions.hidden = true;
+      legendMore.setAttribute('aria-expanded', 'false');
+      updateMapLegend();
+    });
+    document.addEventListener('click', event => {
+      if (!event.target.closest('#mapLegend')) {
+        legendOptions.hidden = true;
+        legendMore.setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        legendOptions.hidden = true;
+        legendMore.setAttribute('aria-expanded', 'false');
+      }
+    });
 
     function updateRasterMenu(item, config) {
       const menu = item.querySelector('.layer-menu');
       if (!menu) return;
       menu.querySelector('.raster-type').value = config.type;
       menu.querySelector('.invert').textContent = config.inverted ? 'Restore original ramp' : 'Invert color ramp';
-      const preview = menu.querySelector('.ramp-preview');
+      menu.querySelector('.ramp-preview').style.background = rasterGradient(config);
       const left = menu.querySelector('.ramp-left');
       const right = menu.querySelector('.ramp-right');
       const note = menu.querySelector('.ramp-note');
       if (config.type === 'bathymetry') {
-        const stops = bathyStops.map(([position, rgb]) => `rgb(${rgb.join(',')}) ${Math.round(position * 100)}%`);
-        if (config.inverted) stops.reverse();
-        // A reversed gradient needs swapped positions, not reversed percentages.
-        const rainbow = config.inverted
-          ? bathyStops.map(([position], index) => {
-              const rgb = bathyStops[bathyStops.length - index - 1][1];
-              return `rgb(${rgb.join(',')}) ${Math.round(position * 100)}%`;
-            })
-          : stops;
-        preview.style.background = `linear-gradient(to right, ${rainbow.join(',')})`;
         left.textContent = 'Shallow'; right.textContent = 'Deep';
-        note.textContent = config.min >= 0
-          ? 'Assumes positive water depths (smaller = shallower).'
-          : 'Assumes negative elevations (larger = shallower).';
+        note.textContent = config.stretch.mono.low >= 0
+          ? '2–98% stretch · assumes positive-down depths.'
+          : '2–98% stretch · assumes negative elevations.';
       } else if (config.type === 'sidescan' || config.type === 'backscatter') {
-        preview.style.background = config.inverted
-          ? 'linear-gradient(to right, white, black)'
-          : 'linear-gradient(to right, black, white)';
         left.textContent = 'Low'; right.textContent = 'High';
-        note.textContent = 'Grayscale based on raster intensity.';
+        note.textContent = '2–98% stretch · grayscale intensity.';
       } else {
-        preview.style.background = config.georaster.numberOfRasters >= 3
-          ? (config.inverted ? 'linear-gradient(to right, #00ffff, #ff00ff, #ffff00)' : 'linear-gradient(to right, #ff0000, #00ff00, #0000ff)')
-          : (config.inverted ? 'linear-gradient(to right, #d2ebee, #12508a)' : 'linear-gradient(to right, #12508a, #d2ebee)');
         left.textContent = 'Low'; right.textContent = 'High';
-        note.textContent = config.georaster.numberOfRasters >= 3
-          ? 'Original RGB image; inversion makes a color negative.'
-          : 'Original SurveyLine blue ramp.';
+        note.textContent = 'Original TIFF display without percentile stretch.';
       }
     }
 
@@ -340,6 +499,7 @@
       if (typeof rec.layer.updateColors === 'function') rec.layer.updateColors(fn);
       else { rec.layer.options.pixelValuesToColorFn = fn; rec.layer.redraw(); }
       updateRasterMenu(item, rec.rasterConfig);
+      updateMapLegend();
     }
 
     async function addRaster(file) {
@@ -357,7 +517,8 @@
       const maximum = Number(georaster.maxs?.[0]);
       const min = Number.isFinite(minimum) ? minimum : 0;
       const max = Number.isFinite(maximum) && maximum > min ? maximum : min + 1;
-      const rasterConfig = { georaster, min, max, type: 'none', inverted: false };
+      const stretch = await computeRasterStretch(georaster);
+      const rasterConfig = { georaster, min, max, stretch, type: 'none', inverted: false };
       const layer = new GeoRasterLayer({ georaster, opacity: 0.82, resolution: 128,
         pixelValuesToColorFn: makeRasterColorFn(rasterConfig) });
       const bounds = layer.getBounds();
@@ -452,6 +613,7 @@
         records.delete(item.dataset.id);
         item.remove();
         empty.style.display = records.size ? 'none' : 'block';
+        updateMapLegend();
       }
     });
     document.addEventListener('click', event => {
@@ -465,6 +627,7 @@
       records.clear();
       layersEl.replaceChildren();
       empty.style.display = 'block';
+      updateMapLegend();
       setStatus('All user layers cleared.');
     });
   </script>
