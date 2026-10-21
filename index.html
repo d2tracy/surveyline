@@ -236,7 +236,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.13</span>
+      <span>Version 1.6.14</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -457,7 +457,7 @@
         <button class="export-button" id="saveSurveyFile" type="button">Save As…</button>
         <button class="export-button secondary" id="downloadSurveyFile" type="button">Download</button>
       </div>
-      <p class="export-note">Save As… lets you choose a folder and file name in supported browsers (including Chrome on desktop). Download uses your browser's normal download location or prompt. GeoTIFF captures the visible map content (not the controls or floating legend) in EPSG:3857.</p>
+      <p class="export-note">Save As… lets you choose a folder and file name in supported browsers (including Chrome on desktop). Download uses your browser's normal download location or prompt. GeoTIFF captures the visible map content (not the controls or floating legend) in EPSG:3857 and exports it at a higher resolution for sharper vector outlines.</p>
     </section>
   </div>
 
@@ -1731,9 +1731,14 @@
       const projectedCorner = (x, y) => map.options.crs.project(map.containerPointToLatLng([x, y]));
       const projectedTopLeft = projectedCorner(0, 0);
       const projectedLowerRight = projectedCorner(width, height);
+      const exportScale = Math.max(1, Math.min(3, Math.ceil(window.devicePixelRatio || 1), 2));
       const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
+      canvas.width = Math.round(width * exportScale);
+      canvas.height = Math.round(height * exportScale);
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.scale(exportScale, exportScale);
+      ctx.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
       ctx.fillStyle = '#dcebef'; ctx.fillRect(0, 0, width, height);
       const panes = map.getPanes();
       const paneOrder = ['tilePane', 'overlayPane', 'shadowPane', 'markerPane'];
