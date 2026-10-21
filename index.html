@@ -40,6 +40,8 @@
     .help { padding: 12px; background: #f3f7f9; border-radius: 9px; }
     .help p { margin: 0; font-size: 12px; }
     footer { color: #8497a2; font-size: 11px; margin-top: 18px; }
+    .creator-credit { margin-top: 15px; padding-top: 12px; border-top: 1px solid #e2ecf0; font-size: 12px; color: #557083; line-height: 1.5; }
+    .creator-credit strong { color: #17334b; }
     @media (max-width: 650px) {
       header { padding: 0 14px; }
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
@@ -51,7 +53,7 @@
 <body>
   <header>
     <strong>◉ SurveyLine</strong>
-    <span>Mini GIS · Version 0.1</span>
+    <span>Mini GIS · Version 0.1.1</span>
   </header>
   <div class="shell">
     <aside>
@@ -77,7 +79,10 @@
         <p><b>Shapefile:</b> ZIP the .shp, .shx, .dbf and .prj files together. The .prj is essential for projected datasets.</p>
         <p style="margin-top: 9px"><b>Raster:</b> Upload a georeferenced GeoTIFF. Ordinary TIFF photographs without georeferencing cannot be positioned.</p>
       </div>
-      <footer>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</footer>
+      <footer>
+        <div>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</div>
+        <div class="creator-credit">Webpage made and designed by <strong>Declan Tracy</strong></div>
+      </footer>
     </aside>
     <main id="map" aria-label="Interactive GIS map"></main>
   </div>
@@ -91,7 +96,35 @@
   <script>
     'use strict';
 
-    const map = L.map('map', { zoomControl: true }).setView([51.9, -8.45], 9);
+    const map = L.map('map', { zoomControl: true, zoomSnap: 0.05 }).setView([51.9, -8.45], 9);
+
+    // Ctrl + mouse wheel: precise, slower zoom centered on the cursor.
+    // Capture the event before Leaflet's normal wheel handler so that holding Ctrl
+    // does not also zoom the browser page or trigger a second map zoom.
+    // Normal scrolling and the +/- buttons keep their original behavior.
+    let fineWheelRemainder = 0;
+    map.getContainer().addEventListener('wheel', event => {
+      if (!event.ctrlKey) {
+        fineWheelRemainder = 0;
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const pixelDelta = event.deltaY * (
+        event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? map.getSize().y : 1
+      );
+      // A typical 100px wheel movement is about 0.25 zoom levels with Ctrl held.
+      const fineZoomStep = 0.05;
+      fineWheelRemainder += Math.max(-0.4, Math.min(0.4, -pixelDelta / 400));
+      const increments = Math.trunc(fineWheelRemainder / fineZoomStep);
+      if (increments === 0) return;
+      fineWheelRemainder -= increments * fineZoomStep;
+
+      const requestedZoom = map.getZoom() + increments * fineZoomStep;
+      const nextZoom = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), requestedZoom));
+      map.setZoomAround(map.mouseEventToContainerPoint(event), nextZoom, { animate: false });
+    }, { capture: true, passive: false });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
