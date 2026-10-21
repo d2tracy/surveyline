@@ -3,14 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SurveyLine | Mini GIS</title>
+  <title>SurveyLine</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, sans-serif; color: #17334b; background: #eef4f6; }
+    :root { --sidebar-width: 300px; font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; color: #17334b; background: #eef4f6; }
     * { box-sizing: border-box; }
     body { margin: 0; }
     header { height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; color: white; background: #092d42; }
-    header strong { font-size: 21px; letter-spacing: -.5px; }
+    /* Keep the original SurveyLine logo font; use Calibri everywhere else. */
+    header strong { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 21px; letter-spacing: -.5px; }
+    .header-brand { display: flex; align-items: baseline; gap: 15px; min-width: 0; }
+    .header-brand .header-credit { font-size: 13px; font-weight: 400; letter-spacing: normal; white-space: nowrap; opacity: .78; }
+    input, select, textarea, button { font-family: inherit; }
+    .leaflet-container, .leaflet-control, .leaflet-tooltip, .leaflet-popup-content-wrapper { font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; }
     header span { font-size: 12px; opacity: .7; }
     .header-actions { display: flex; align-items: center; gap: 16px; }
     .plan-survey-btn { border: 0; border-radius: 7px; background: #f0a05c; color: #092d42; padding: 9px 16px; font-weight: 750; font-size: 13px; }
@@ -89,8 +94,15 @@
     .export-message.error { background: #fff1ed; border: 1px solid #f4beb1; color: #a13627; }
     .export-message[hidden] { display: none; }
     .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
-    .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
-    aside { background: white; padding: 22px; overflow-y: auto; border-right: 1px solid #dce6eb; }
+    .shell { display: grid; grid-template-columns: var(--sidebar-width) 9px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
+    /* Draggable splitter: width is updated in CSS pixels; sidebar scroll remains independent. */
+    .sidebar-resizer { position: relative; z-index: 1001; min-width: 9px; background: #e9f1f4; border-left: 1px solid #d2e1e8; border-right: 1px solid #d2e1e8; cursor: col-resize; touch-action: none; user-select: none; }
+    .sidebar-resizer::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); height: 54px; width: 3px; border-radius: 4px; background: #94b4c3; }
+    .sidebar-resizer:hover, .sidebar-resizer:focus-visible, .sidebar-resizer.dragging { background: #d5e8f0; }
+    .sidebar-resizer:hover::after, .sidebar-resizer:focus-visible::after, .sidebar-resizer.dragging::after { background: #347995; }
+    .sidebar-resizer:focus-visible { outline: 2px solid #347995; outline-offset: -2px; }
+    body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
+    aside { background: white; min-width: 0; padding: 22px; overflow-y: auto; border-right: 0; }
     .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #618196; font-weight: 800; }
     h2 { font-size: 18px; margin: 8px 0 12px; }
     p { line-height: 1.5; color: #557083; font-size: 13px; }
@@ -150,13 +162,15 @@
     .help { padding: 12px; background: #f3f7f9; border-radius: 9px; }
     .help p { margin: 0; font-size: 12px; }
     footer { color: #8497a2; font-size: 11px; margin-top: 18px; }
-    .creator-credit { margin-top: 15px; padding-top: 12px; border-top: 1px solid #e2ecf0; font-size: 12px; color: #557083; line-height: 1.5; }
-    .creator-credit strong { color: #17334b; }
     @media (max-width: 650px) {
       header { padding: 0 14px; }
       .header-actions { gap: 9px; }
       .plan-survey-btn { padding: 8px 10px; font-size: 12px; }
       header span { font-size: 10px; }
+      .header-brand { gap: 7px; }
+      .header-brand .header-credit { font-size: 10px; white-space: normal; }
+      header strong { font-size: 17px; }
+      .sidebar-resizer { display: none; }
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
       aside { order: 2; max-height: 47%; padding: 15px; border-right: 0; border-top: 1px solid #dce6eb; }
       .map-stage { order: 1; min-height: 53%; }
@@ -166,13 +180,16 @@
 </head>
 <body>
   <header>
-    <strong>◉ SurveyLine</strong>
+    <div class="header-brand">
+      <strong>◉ SurveyLine</strong>
+      <span class="header-credit">Created by Declan Tracy</span>
+    </div>
     <div class="header-actions">
-      <span>Mini GIS · Version 1.6.4</span>
+      <span>Version 1.6.5</span>
     </div>
   </header>
-  <div class="shell">
-    <aside>
+  <div class="shell" id="appShell">
+    <aside id="sidebar">
       <div class="eyebrow">Workspace</div>
       <h2>Import your data</h2>
       <div class="help import-help">
@@ -204,9 +221,12 @@
       </div>
       <footer>
         <div>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</div>
-        <div class="creator-credit">Webpage made and designed by <strong>Declan Tracy</strong></div>
       </footer>
     </aside>
+    <div id="sidebarResizer" class="sidebar-resizer" role="separator" tabindex="0"
+         aria-label="Resize left workspace panel" aria-orientation="vertical"
+         aria-controls="sidebar" aria-valuemin="240" aria-valuemax="900" aria-valuenow="300"
+         title="Drag to resize the sidebar (double-click to reset)"></div>
     <div class="map-stage">
       <main id="map" aria-label="Interactive GIS map"></main>
       <section class="map-legend" id="mapLegend" aria-label="Raster color legend" hidden>
@@ -367,6 +387,97 @@
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     L.control.scale({ imperial: false }).addTo(map);
+
+    // The desktop workspace can be resized by dragging the splitter, just like a GIS layers dock.
+    // Recalculate the Leaflet viewport after each width change so tiles and map interactions
+    // remain correctly aligned. Narrow screens retain the original stacked mobile layout.
+    const appShell = document.getElementById('appShell');
+    const sidebarResizer = document.getElementById('sidebarResizer');
+    const sidebarMinimum = 240;
+    const sidebarDefault = 300;
+    let sidebarWidth = sidebarDefault;
+    let sidebarResizeFrame = null;
+    let activeSidebarPointer = null;
+
+    function sidebarMaximum() {
+      // Leave at least 320px for the map, even when the panel is fully expanded.
+      return Math.max(sidebarMinimum, Math.min(900, appShell.getBoundingClientRect().width - 329));
+    }
+    function refreshMapAfterSidebarResize() {
+      if (sidebarResizeFrame !== null) return;
+      sidebarResizeFrame = requestAnimationFrame(() => {
+        sidebarResizeFrame = null;
+        map.invalidateSize({ pan: false });
+      });
+    }
+    function setSidebarWidth(width) {
+      const max = sidebarMaximum();
+      sidebarWidth = Math.round(Math.max(sidebarMinimum, Math.min(max, width)));
+      appShell.style.setProperty('--sidebar-width', sidebarWidth + 'px');
+      sidebarResizer.setAttribute('aria-valuemax', String(Math.round(max)));
+      sidebarResizer.setAttribute('aria-valuenow', String(sidebarWidth));
+      refreshMapAfterSidebarResize();
+    }
+    function saveSidebarWidth() {
+      try { localStorage.setItem('surveyline:sidebar-width', String(sidebarWidth)); } catch (_) {}
+    }
+    try {
+      const saved = Number(localStorage.getItem('surveyline:sidebar-width'));
+      if (Number.isFinite(saved) && saved >= sidebarMinimum) sidebarWidth = saved;
+    } catch (_) {}
+    setSidebarWidth(sidebarWidth);
+
+    sidebarResizer.addEventListener('pointerdown', event => {
+      if (window.innerWidth <= 650 || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      event.preventDefault();
+      activeSidebarPointer = event.pointerId;
+      sidebarResizer.setPointerCapture(event.pointerId);
+      sidebarResizer.classList.add('dragging');
+      document.body.classList.add('sidebar-resizing');
+    });
+    sidebarResizer.addEventListener('pointermove', event => {
+      if (activeSidebarPointer !== event.pointerId) return;
+      setSidebarWidth(event.clientX - appShell.getBoundingClientRect().left);
+    });
+    function stopSidebarResize(event) {
+      if (activeSidebarPointer !== event.pointerId) return;
+      activeSidebarPointer = null;
+      sidebarResizer.classList.remove('dragging');
+      document.body.classList.remove('sidebar-resizing');
+      if (sidebarResizer.hasPointerCapture(event.pointerId)) sidebarResizer.releasePointerCapture(event.pointerId);
+      saveSidebarWidth();
+      refreshMapAfterSidebarResize();
+    }
+    sidebarResizer.addEventListener('pointerup', stopSidebarResize);
+    sidebarResizer.addEventListener('pointercancel', stopSidebarResize);
+    sidebarResizer.addEventListener('lostpointercapture', event => {
+      if (activeSidebarPointer === event.pointerId) {
+        activeSidebarPointer = null;
+        sidebarResizer.classList.remove('dragging');
+        document.body.classList.remove('sidebar-resizing');
+        saveSidebarWidth();
+      }
+    });
+    sidebarResizer.addEventListener('keydown', event => {
+      let requested = sidebarWidth;
+      const step = event.shiftKey ? 50 : 20;
+      if (event.key === 'ArrowLeft') requested -= step;
+      else if (event.key === 'ArrowRight') requested += step;
+      else if (event.key === 'Home') requested = sidebarMinimum;
+      else if (event.key === 'End') requested = sidebarMaximum();
+      else return;
+      event.preventDefault();
+      setSidebarWidth(requested);
+      saveSidebarWidth();
+    });
+    sidebarResizer.addEventListener('dblclick', () => {
+      setSidebarWidth(sidebarDefault);
+      saveSidebarWidth();
+    });
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 650) setSidebarWidth(sidebarWidth);
+      refreshMapAfterSidebarResize();
+    });
 
     const fileInput = document.getElementById('files');
     const status = document.getElementById('status');
