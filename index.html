@@ -128,7 +128,7 @@
   <header>
     <strong>◉ SurveyLine</strong>
     <div class="header-actions">
-      <span>Mini GIS · Version 1.6.1</span>
+      <span>Mini GIS · Version 1.6.2</span>
     </div>
   </header>
   <div class="shell">
@@ -368,8 +368,9 @@
     // --- Survey-line generation -------------------------------------------------
     // Compass bearings in degrees clockwise from true North (0=N/S, 90=E/W).
     // GeoJSON is WGS84, but spacing/intersections must be computed in metres.
-    // proj4 is already loaded for GeoTIFF support; use a local metre-based
-    // tangent plane centered on the selected survey area.
+    // Use a locally centered WGS84 Transverse Mercator in metres for planning.
+    // Line orientation is referenced to geographic true north at the area's
+    // representative center (not simply to north on a projected grid).
     function collectSurveyPolygons(sourceData) {
       const polygons = [];
       function visit(node) {
@@ -385,39 +386,88 @@
       return polygons;
     }
 
-    // Pure JavaScript WGS84 local projection fallback for small survey areas.
-    // This is not a general replacement for a full GIS projection engine.
-    function localWGS84TangentProjection(centerLon, centerLat) {
+    // Local WGS84 Transverse Mercator, with ellipsoidal meridional arc and the
+    // standard small-area forward / inverse series. By implementing it directly,
+    // planning never silently changes into standard UTM or a different tangent
+    // approximation if proj4 fails to load. The central scale factor is 1.0.
+    // This engine is intended for compact coastal survey areas (<= 100 km).
+    function localWGS84TransverseMercator(centerLon, centerLat) {
       const rad = Math.PI / 180, deg = 180 / Math.PI;
-      const a = 6378137, f = 1 / 298.257223563, e2 = f * (2 - f);
-      const e4 = e2 * e2, e6 = e4 * e2;
+      const a = 6378137, f = 1 / 298.257223563;
+      const e2 = f * (2 - f), e4 = e2 * e2, e6 = e4 * e2;
+      const ep2 = e2 / (1 - e2);
       const phi0 = centerLat * rad, lam0 = centerLon * rad;
-      function arc(phi) {
-        return a * ((1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256) * phi
+      const meridionalFactor = 1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256;
+      function meridionalArc(phi) {
+        return a * (meridionalFactor * phi
           - (3 * e2 / 8 + 3 * e4 / 32 + 45 * e6 / 1024) * Math.sin(2 * phi)
           + (15 * e4 / 256 + 45 * e6 / 1024) * Math.sin(4 * phi)
           - (35 * e6 / 3072) * Math.sin(6 * phi));
       }
-      function northRadius(phi) {
-        const q = 1 - e2 * Math.sin(phi) ** 2;
-        return a * (1 - e2) / (q ** 1.5);
-      }
-      function eastRadius(phi) {
-        const q = 1 - e2 * Math.sin(phi) ** 2;
-        return a * Math.cos(phi) / Math.sqrt(q);
-      }
-      const originArc = arc(phi0);
+      const m0 = meridionalArc(phi0);
+      const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
       return {
         forward: ([lon, lat]) => {
           const phi = lat * rad;
-          return [(lon * rad - lam0) * eastRadius(phi), arc(phi) - originArc];
+          const delta = lon * rad - lam0;
+          const sin = Math.sin(phi), cos = Math.cos(phi);
+          const tan = Math.tan(phi);
+          const t = tan * tan, c = ep2 * cos * cos, A = cos * delta;
+          const n = a / Math.sqrt(1 - e2 * sin * sin);
+          const x = n * (A + (1 - t + c) * A ** 3 / 6
+            + (5 - 18 * t + t * t + 72 * c - 58 * ep2) * A ** 5 / 120);
+          const y = meridionalArc(phi) - m0 + n * tan * (A * A / 2
+            + (5 - t + 9 * c + 4 * c * c) * A ** 4 / 24
+            + (61 - 58 * t + t * t + 600 * c - 330 * ep2) * A ** 6 / 720);
+          return [x, y];
         },
         inverse: ([x, y]) => {
-          let phi = phi0 + y / northRadius(phi0);
-          for (let i = 0; i < 5; i++) phi -= (arc(phi) - originArc - y) / northRadius(phi);
-          return [(lam0 + x / eastRadius(phi)) * deg, phi * deg];
+          const mu = (m0 + y) / (a * meridionalFactor);
+          const phi1 = mu
+            + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
+            + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+            + 151 * e1 ** 3 / 96 * Math.sin(6 * mu)
+            + 1097 * e1 ** 4 / 512 * Math.sin(8 * mu);
+          const sin1 = Math.sin(phi1), cos1 = Math.cos(phi1);
+          const tan1 = Math.tan(phi1), t1 = tan1 * tan1;
+          const c1 = ep2 * cos1 * cos1;
+          const n1 = a / Math.sqrt(1 - e2 * sin1 * sin1);
+          const r1 = a * (1 - e2) / (1 - e2 * sin1 * sin1) ** 1.5;
+          const D = x / n1;
+          const phi = phi1 - (n1 * tan1 / r1) * (D * D / 2
+            - (5 + 3 * t1 + 10 * c1 - 4 * c1 * c1 - 9 * ep2) * D ** 4 / 24
+            + (61 + 90 * t1 + 298 * c1 + 45 * t1 * t1 - 252 * ep2 - 3 * c1 * c1) * D ** 6 / 720);
+          const lam = lam0 + (D - (1 + 2 * t1 + c1) * D ** 3 / 6
+            + (5 - 2 * c1 + 28 * t1 - 3 * c1 * c1 + 8 * ep2 + 24 * t1 * t1) * D ** 5 / 120) / cos1;
+          return [lam * deg, phi * deg];
         }
       };
+    }
+
+    // Area-weighted centroid: interior holes count negatively. This lets us
+    // reference compass orientation to a representative point of an irregular
+    // or multi-part survey area, rather than an arbitrary bounding-box corner.
+    function surveyReferencePoint(projected) {
+      let weightedX = 0, weightedY = 0, totalArea = 0;
+      for (const polygon of projected) {
+        for (let r = 0; r < polygon.length; r++) {
+          const ring = polygon[r];
+          let twiceArea = 0, xsum = 0, ysum = 0;
+          for (let i = 0; i < ring.length; i++) {
+            const p = ring[i], q = ring[(i + 1) % ring.length];
+            const cross = p[0] * q[1] - q[0] * p[1];
+            twiceArea += cross;
+            xsum += (p[0] + q[0]) * cross;
+            ysum += (p[1] + q[1]) * cross;
+          }
+          if (Math.abs(twiceArea) < 0.001) continue;
+          const area = (r === 0 ? 1 : -1) * Math.abs(twiceArea / 2);
+          weightedX += area * xsum / (3 * twiceArea);
+          weightedY += area * ysum / (3 * twiceArea);
+          totalArea += area;
+        }
+      }
+      return totalArea > 0.001 ? [weightedX / totalArea, weightedY / totalArea] : [0, 0];
     }
 
     function projectedSurveyPolygons(sourceData) {
@@ -436,50 +486,15 @@
       if (maxLon - minLon > 180) throw new Error('Survey areas crossing the international date line are not supported yet.');
       const centerLon = (minLon + maxLon) / 2;
       const centerLat = (minLat + maxLat) / 2;
-      // Projected metres, not longitude/latitude degrees. A centered transverse
-      // Mercator is stable for compact survey sites, keeps local scale near 1,
-      // and makes grid north virtually equal to true north at the survey center.
-      // Some versions of proj4js return NaN from custom AEQD definitions; that
-      // must not prevent otherwise valid WGS84 polygons from being planned.
-      const defs = [
-        `+proj=tmerc +lat_0=${centerLat} +lon_0=${centerLon} +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs`
-      ];
-      if (centerLat > -80 && centerLat < 84) {
-        const zone = Math.min(60, Math.max(1, Math.floor((centerLon + 180) / 6) + 1));
-        defs.push(`+proj=utm +zone=${zone} ${centerLat < 0 ? '+south ' : ''}+datum=WGS84 +units=m +no_defs`);
+      if (centerLat <= -80 || centerLat >= 84) {
+        throw new Error('Polar survey areas are not supported by this local projection yet.');
       }
-      let projection = null;
-      if (typeof proj4 === 'function') {
-        for (const definition of defs) {
-          try {
-            const candidate = proj4('EPSG:4326', definition);
-            // Verify forward and inverse transforms using actual polygon vertices.
-            const samples = [positions[0], positions[Math.floor(positions.length / 2)], positions[positions.length - 1]];
-            if (samples.every(([lon, lat]) => {
-              const xy = candidate.forward([lon, lat]);
-              if (!Array.isArray(xy) || !xy.every(Number.isFinite)) return false;
-              const ll = candidate.inverse(xy);
-              return Array.isArray(ll) && ll.every(Number.isFinite) &&
-                Math.abs(ll[0] - lon) < 1e-6 && Math.abs(ll[1] - lat) < 1e-6;
-            })) { projection = candidate; break; }
-          } catch (error) {
-            console.warn('Survey projection candidate unavailable:', error);
-          }
-        }
+      const approximateHeight = (maxLat - minLat) * 111700;
+      const approximateWidth = (maxLon - minLon) * 111700 * Math.cos(centerLat * Math.PI / 180);
+      if (Math.max(approximateHeight, approximateWidth) > 100000) {
+        throw new Error('This area spans more than 100 km. Split it into smaller survey areas for accurate local planning.');
       }
-      if (!projection) {
-        // Small-area WGS84 tangent-plane fallback: uses ellipsoidal radii of
-        // curvature and the WGS84 meridional arc. Accurate for compact surveys
-        // and independent of browser-side projection library implementations.
-        // Refuse a large survey rather than silently introducing distortion.
-        const approximateHeight = (maxLat - minLat) * 111300;
-        const approximateWidth = (maxLon - minLon) * 111300 * Math.cos(centerLat * Math.PI / 180);
-        if (Math.max(approximateHeight, approximateWidth) > 20000) {
-          throw new Error('Unable to initialize the metre projection for this large survey area. Reload the page and check the projection library.');
-        }
-        projection = localWGS84TangentProjection(centerLon, centerLat);
-        console.warn('SurveyLine: using the WGS84 local tangent-plane fallback for metre coordinates.');
-      }
+      const projection = localWGS84TransverseMercator(centerLon, centerLat);
       const projected = geoPolygons.map(polygon => polygon.map(ring => {
         if (!Array.isArray(ring) || ring.length < 4) throw new Error('Invalid polygon ring in the selected shapefile.');
         return ring.map(point => projection.forward([point[0], point[1]]));
@@ -488,7 +503,24 @@
           !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) {
         throw new Error('Survey polygon projection failed. Check your shapefile geometries and CRS.');
       }
-      return { projected, projection };
+      // Validate inverse before using the projection for survey geometry.
+      const samplePoints = [positions[0], positions[Math.floor(positions.length / 2)], positions[positions.length - 1]];
+      if (!samplePoints.every(point => {
+        const roundtrip = projection.inverse(projection.forward(point));
+        return roundtrip.every(Number.isFinite) &&
+          Math.abs(roundtrip[0] - point[0]) < 1e-6 && Math.abs(roundtrip[1] - point[1]) < 1e-6;
+      })) throw new Error('The local projection could not be validated for this survey area.');
+      const reference = surveyReferencePoint(projected);
+      const geographicReference = projection.inverse(reference);
+      // Finite difference of a *geographic* northwards movement provides the
+      // grid direction of true north at the area centroid (grid convergence).
+      const geographicNorth = [geographicReference[0], geographicReference[1] + 0.0001];
+      const gridNorth = projection.forward(geographicNorth);
+      const eastwardComponent = gridNorth[0] - reference[0];
+      const northwardComponent = gridNorth[1] - reference[1];
+      const convergenceRadians = Math.atan2(eastwardComponent, northwardComponent);
+      if (!Number.isFinite(convergenceRadians)) throw new Error('Could not determine local true north.');
+      return { projected, projection, convergenceRadians };
     }
 
     // Intersect one constant-cross-track line with a polygon. The half-open
@@ -527,9 +559,11 @@
     }
 
     function generateSurveyGeometry(data, spacing, bearingDegrees) {
-      const { projected, projection } = projectedSurveyPolygons(data);
-      const angle = bearingDegrees * Math.PI / 180;
-      // Along-track d follows the compass bearing; n is 90° clockwise to it.
+      const { projected, projection, convergenceRadians } = projectedSurveyPolygons(data);
+      // Requested heading is TRUE north at the area's centroid. Correct for
+      // local grid convergence before constructing parallel projected lines.
+      const angle = bearingDegrees * Math.PI / 180 + convergenceRadians;
+      // Along-track d follows the corrected grid bearing; n is perpendicular.
       const dx = Math.sin(angle), dy = Math.cos(angle);
       const nx = Math.cos(angle), ny = -Math.sin(angle);
       const shaped = projected.map(polygon => polygon.map(ring => ring.map(([x, y]) => ({
@@ -550,17 +584,31 @@
       const firstU = (minU + maxU - (numberOfLines - 1) * spacing) / 2;
       const features = [];
       let totalMeters = 0;
+      let totalVertices = 0;
+      const maximumVertexIntervalMeters = 75; // Preserve curved geometry on the web map.
+      const maximumVertices = 300000;
       for (let i = 0; i < numberOfLines; i++) {
         const u = firstU + i * spacing;
         const segments = mergeSurveySegments(shaped.flatMap(polygon => lineSegmentsInPolygon(polygon, u)));
         for (const [v0, v1] of segments) {
           const toLonLat = v => projection.inverse([u * nx + v * dx, u * ny + v * dy]);
-          const start = toLonLat(v0), end = toLonLat(v1);
-          if (start.some(x => !Number.isFinite(x)) || end.some(x => !Number.isFinite(x))) {
-            throw new Error('Unable to convert generated survey lines to WGS84.');
+          // A constant projected XY line becomes slightly curved in geographic
+          // coordinates. Intermediate points preserve it in Leaflet and export.
+          const divisions = Math.max(1, Math.ceil((v1 - v0) / maximumVertexIntervalMeters));
+          totalVertices += divisions + 1;
+          if (totalVertices > maximumVertices) {
+            throw new Error('This plan would contain too many line vertices. Increase the line spacing or divide the survey area.');
+          }
+          const coordinates = [];
+          for (let j = 0; j <= divisions; j++) {
+            const lonLat = toLonLat(v0 + (v1 - v0) * j / divisions);
+            if (lonLat.some(x => !Number.isFinite(x))) {
+              throw new Error('Unable to convert generated survey lines to WGS84.');
+            }
+            coordinates.push(lonLat);
           }
           features.push({ type: 'Feature', properties: { line: i + 1, heading_deg: bearingDegrees, spacing_m: spacing },
-            geometry: { type: 'LineString', coordinates: [start, end] } });
+            geometry: { type: 'LineString', coordinates } });
           totalMeters += v1 - v0;
           if (features.length > 10000) throw new Error('This survey produces too many separate line segments. Increase spacing or simplify the polygon.');
         }
