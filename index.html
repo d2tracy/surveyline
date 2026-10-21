@@ -99,6 +99,20 @@
     .optimization-description { color: #597788; font-size: 12px; line-height: 1.4; margin: 5px 0 13px 23px; }
     .optimization-caution { color: #925217; margin-bottom: 4px; }
     .optimization-caution[hidden] { display: none; }
+    .coverage-settings { margin: 15px 0 0; padding: 13px 14px; background: #f1f7fa; border: 1px solid #cbdfe8; }
+    .coverage-choice { display: flex !important; align-items: flex-start; gap: 9px; margin: 0 !important; font-size: 13px; cursor: pointer; }
+    .coverage-choice input { flex-shrink: 0; margin: 2px 0 0; accent-color: #2777a6; }
+    .coverage-choice input:disabled { cursor: not-allowed; }
+    .coverage-hint { font-size: 12px; line-height: 1.45; color: #587689; margin: 8px 0 0 24px; }
+    .coverage-hint[hidden] { display: none; }
+    .planned-coverage-download { display: block; width: 100%; background: #e8f3f8; border: 1px solid #9abed1; color: #1c6184; font-size: 11px; text-align: left; font-weight: 700; margin: 6px 0 8px; padding: 8px 10px; cursor: pointer; }
+    .planned-coverage-download[hidden] { display: none; }
+    .coverage-legend { position: absolute; right: 14px; bottom: 32px; z-index: 950; background: rgba(255,255,255,.96); border: 1px solid #b9d2df; padding: 9px 12px; box-shadow: 0 2px 12px #0d2e4120; font-size: 11px; color: #264b5e; }
+    .coverage-legend[hidden] { display: none; }
+    .coverage-legend strong { display: block; margin-bottom: 6px; font-size: 12px; }
+    .coverage-legend .coverage-key { display: flex; gap: 7px; align-items: center; margin: 4px 0; }
+    .coverage-legend .coverage-swatch { display: inline-block; width: 13px; height: 13px; border: 1px solid #0002; }
+
     .survey-error { padding: 10px 12px; border-radius: 7px; margin: 14px 0 0; background: #fff1ed; border: 1px solid #f4beb1; color: #a13627; font-size: 12px; line-height: 1.45; }
     .survey-error[hidden] { display: none; }
     /* Planned Lines uses the same unboxed section layout and typography as Imported Layers. */
@@ -271,7 +285,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.19</span>
+      <span>Version 1.6.20</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -458,6 +472,14 @@
         <p class="optimization-description">Tests different starting offsets to find the lowest calculated survey time for your line spacing and orientation while checking simplified swath coverage; this does not optimize vessel routing.</p>
         <p class="optimization-description optimization-caution" id="optimizationCaution" hidden>For manual spacing, the optimization assumes a usable swath equal to the specified line spacing; actual seafloor coverage must be verified.</p>
       </fieldset>
+      <div class="coverage-settings" aria-label="Projected sonar coverage">
+        <label class="coverage-choice" for="generateCoverageMap">
+          <input id="generateCoverageMap" type="checkbox" disabled>
+          <span>Generate projected coverage map (GeoTIFF)</span>
+        </label>
+        <p id="coverageAvailabilityHint" class="coverage-hint">Requires a bathymetry TIFF marked Bathymetry, and Calculate from swath → Calculate from depth + beam angles with valid depth, angles and overlap.</p>
+        <p class="coverage-hint">Models the port and starboard swaths from actual raster depth sampled along each planned line. Exports an 8-bit, single-band classified TIFF: <b style="color:#bd333f">red</b> = no coverage, <b style="color:#af8010">yellow</b> = one line, <b style="color:#258b54">green</b> = two or more lines. NoData is transparent.</p>
+      </div>
       <p class="survey-error" id="surveyError" role="alert" hidden></p>
       <button type="button" id="drawSurveyLines" class="survey-draw">Draw Survey Lines</button>
     </section>
@@ -786,6 +808,8 @@
     const turnTimeValueEl = document.getElementById('turnTimeValue');
     const surveyPlacementRadios = Array.from(document.querySelectorAll('input[name="surveyPlacement"]'));
     const optimizationCautionEl = document.getElementById('optimizationCaution');
+    const generateCoverageMapEl = document.getElementById('generateCoverageMap');
+    const coverageAvailabilityHintEl = document.getElementById('coverageAvailabilityHint');
     const currentSurveyPlacement = () => surveyPlacementRadios.find(radio => radio.checked)?.value || 'default';
     function updateOptimizationCaution() {
       optimizationCautionEl.hidden = currentSurveyPlacement() !== 'optimized' || lineSpacingModeEl.value !== 'manual';
@@ -976,6 +1000,29 @@
       }
     });
     surveyAreaSelect.addEventListener('change', updateDepthSource);
+    function updateCoverageAvailability() {
+      const active = activeBathymetryLayer();
+      const area = selectedSurveyAreaRecord();
+      const overlap = readOptionalNumber(swathOverlapValueEl);
+      const ok = !!active && validSurveyArea(area) &&
+        active.rec.rasterConfig.georaster.numberOfRasters === 1 &&
+        lineSpacingModeEl.value === 'swath' && swathWidthModeEl.value === 'depthAngles' &&
+        readOptionalNumber(swathDepthValueEl) > 0 &&
+        validBeamAngle(readOptionalNumber(portBeamAngleValueEl)) &&
+        validBeamAngle(readOptionalNumber(starboardBeamAngleValueEl)) &&
+        computeSwathWidthMetres() > 0 &&
+        Number.isFinite(overlap) && overlap >= 0 && overlap < 100;
+      generateCoverageMapEl.disabled = !ok;
+      if (!ok) generateCoverageMapEl.checked = false;
+      coverageAvailabilityHintEl.textContent = ok
+        ? `Ready: actual depths will be sampled from ${active.rec.name} along each survey line. A colored single-band GeoTIFF will download and appear on the map.`
+        : 'Requires a selected survey polygon, a single-band TIFF marked Bathymetry, and Calculate from swath → Calculate from depth + beam angles with valid water depth, port/starboard angles and overlap.';
+    }
+    [lineSpacingModeEl, swathWidthModeEl, surveyAreaSelect].forEach(el =>
+      el.addEventListener('change', updateCoverageAvailability));
+    [swathDepthValueEl, portBeamAngleValueEl, starboardBeamAngleValueEl, swathOverlapValueEl].forEach(el =>
+      el.addEventListener('input', updateCoverageAvailability));
+
 
     // Compute an actual, unclipped arithmetic mean from cell centres. Perform
     // point-in-polygon tests in pixel-grid coordinates to keep the work small.
@@ -1101,6 +1148,7 @@
       } finally {
         calculateDepthFromRasterBtn.textContent = oldText;
         updateDepthSource();
+        updateCoverageAvailability();
       }
     });
 
@@ -1586,7 +1634,275 @@
       refreshPlanSelection(record);
     }
 
-    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes, optimization = null) {
+
+    // -- Bathylines projected coverage ---------------------------------------
+    // Predicted swath is calculated from actual bathymetry sampled at the nadir
+    // track, not from the single mean-depth entry in the Plan Survey dialog.
+    // A locally projected meter CRS is used for true port/starboard distances.
+    // This is a flat-bottom beam-angle approximation, not sonar ray tracing.
+    function coverageRasterTransform(georaster) {
+      const originalCode = String(georaster.projection).toUpperCase().replace(/^EPSG:/, '');
+      const code = originalCode === 'CRS:84' ? '4326' : originalCode;
+      const epsg = Number(code);
+      const pixelWidth = Math.abs(Number(georaster.pixelWidth));
+      const pixelHeight = Math.abs(Number(georaster.pixelHeight));
+      const xmin = Number(georaster.xmin), ymax = Number(georaster.ymax);
+      if (!Number.isFinite(xmin) || !Number.isFinite(ymax) || !(pixelWidth > 0 && pixelHeight > 0))
+        throw new Error('Bathymetry is not a supported north-up georeferenced raster.');
+      if (code !== '4326' && code !== 'CRS:84' && typeof proj4 !== 'function')
+        throw new Error('The projection library did not load.');
+      if (epsg >= 32601 && epsg <= 32660 || epsg >= 32701 && epsg <= 32760) {
+        const zone = epsg % 100;
+        proj4.defs(`EPSG:${code}`, `+proj=utm +zone=${zone} ${epsg >= 32700 ? '+south ' : ''}+datum=WGS84 +units=m +no_defs`);
+      }
+      const toNative = (coord) => code === '4326' || code === 'CRS:84'
+        ? coord : proj4('EPSG:4326', `EPSG:${code}`, coord);
+      // Fail clearly for CRS types unsupported by the installed proj4 build.
+      const probe = toNative([-8, 52]);
+      if (!probe.every(Number.isFinite)) throw new Error('Bathymetry CRS is unsupported; reproject the TIFF to EPSG:4326.');
+      const toPixel = coord => {
+        const p = toNative(coord);
+        return [(p[0] - xmin) / pixelWidth, (ymax - p[1]) / pixelHeight];
+      };
+      return {code, epsg, xmin, ymax, pixelWidth, pixelHeight, toPixel};
+    }
+
+    // Scan-convert a quadrilateral on the coverage grid. A per-line stamp
+    // prevents adjacent portions of a single swath counting as overlap.
+    function paintCoverageQuad(quad, columns, rows, count, stamp, currentLine) {
+      const top = Math.max(0, Math.ceil(Math.min(...quad.map(p => p[1])) - 0.5));
+      const bottom = Math.min(rows - 1, Math.floor(Math.max(...quad.map(p => p[1])) - 0.5));
+      for (let row = top; row <= bottom; row++) {
+        const y = row + 0.5;
+        const intersections = [];
+        for (let k = 0; k < 4; k++) {
+          const a = quad[k], b = quad[(k + 1) % 4];
+          if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y))
+            intersections.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+        }
+        if (intersections.length < 2) continue;
+        intersections.sort((a,b) => a - b);
+        for (let k = 0; k + 1 < intersections.length; k += 2) {
+          const first = Math.max(0, Math.ceil(intersections[k] - 0.5));
+          const last = Math.min(columns - 1, Math.floor(intersections[k + 1] - 0.5));
+          for (let c = first; c <= last; c++) {
+            const index = row * columns + c;
+            if (stamp[index] !== currentLine) {
+              stamp[index] = currentLine;
+              if (count[index] < 2) count[index]++;
+            }
+          }
+        }
+      }
+    }
+
+    // Baseline TIFF, *one band* of palette-indexed UInt8 classes (not RGB):
+    // 0=NoData/outside, 1=red/uncovered, 2=yellow/single, 3=green/overlap.
+    // The TIFF ColorMap tag enables the real category colors in QGIS/GDAL.
+    function writeCoveragePaletteTIFF(samples, width, height, originX, originY, scaleX, scaleY, code) {
+      const crs = Number(code);
+      if (![width,height,originX,originY,scaleX,scaleY].every(Number.isFinite) ||
+          width < 1 || height < 1 || scaleX <= 0 || scaleY <= 0 ||
+          !(crs >= 1 && crs <= 32767)) throw new Error('Cannot write the coverage TIFF georeferencing.');
+      const colors = [[255,255,255],[214,50,55],[246,213,57],[38,160,90]];
+      const palette = [];
+      for (let channel = 0; channel < 3; channel++)
+        for (let index = 0; index < 256; index++)
+          palette.push((colors[index]?.[channel] ?? 0) * 257);
+      const isGeographic = crs === 4326;
+      const keys = isGeographic
+        ? [1,1,0,4,1024,0,1,2, 1025,0,1,1, 2048,0,1,4326, 2054,0,1,9102]
+        : [1,1,0,4,1024,0,1,1, 1025,0,1,1, 3072,0,1,crs, 3076,0,1,9001];
+      const ascii = str => Array.from(new TextEncoder().encode(str + '\0'));
+      const imageStart = 8, imageSize = width * height;
+      const ifdStart = imageStart + imageSize + imageSize % 2;
+      const tags = [
+        [256,4,[width]], [257,4,[height]], [258,3,[8]], [259,3,[1]],
+        [262,3,[3]], [270,2,ascii('Bathylines projected coverage; 1=No coverage (red), 2=One survey pass (yellow), 3=Two or more survey passes (green); 0=NoData.')],
+        [273,4,[imageStart]], [274,3,[1]], [277,3,[1]],
+        [278,4,[height]], [279,4,[imageSize]], [284,3,[1]],
+        [320,3,palette],
+        [33550,12,[scaleX,scaleY,0]],
+        [33922,12,[0,0,0,originX,originY,0]],
+        [34735,3,keys],
+        [42113,2,ascii('0')]
+      ].sort((a,b) => a[0] - b[0]);
+      const sizes = {2:1,3:2,4:4,12:8};
+      const ifdLength = 2 + tags.length * 12 + 4;
+      let extraOffset = ifdStart + ifdLength;
+      const offsets = tags.map(([,type,values]) => {
+        const length = values.length * sizes[type];
+        if (length <= 4) return 0;
+        extraOffset += (type === 12 ? 8 - extraOffset % 8 : 2 - extraOffset % 2) % (type === 12 ? 8 : 2);
+        const here = extraOffset;
+        extraOffset += length;
+        return here;
+      });
+      const buffer = new ArrayBuffer(extraOffset);
+      const view = new DataView(buffer);
+      view.setUint16(0,0x4949,true); view.setUint16(2,42,true); view.setUint32(4,ifdStart,true);
+      new Uint8Array(buffer, imageStart, imageSize).set(samples);
+      view.setUint16(ifdStart,tags.length,true);
+      function writeValue(at,type,value) {
+        if (type === 2) view.setUint8(at,value);
+        else if (type === 3) view.setUint16(at,value,true);
+        else if (type === 4) view.setUint32(at,value,true);
+        else if (type === 12) view.setFloat64(at,value,true);
+      }
+      tags.forEach(([tag,type,values],i) => {
+        const p = ifdStart + 2 + i * 12, off = offsets[i];
+        view.setUint16(p,tag,true); view.setUint16(p+2,type,true);
+        view.setUint32(p+4,values.length,true);
+        if (off) view.setUint32(p+8,off,true);
+        values.forEach((v,j) => writeValue((off || p+8) + j*sizes[type],type,v));
+      });
+      view.setUint32(ifdStart+2+tags.length*12,0,true);
+      return buffer;
+    }
+
+    async function calculateProjectedCoverage(sourceData, linesGeojson, georaster, portAngle, starboardAngle, name) {
+      if (georaster.numberOfRasters !== 1) throw new Error('The coverage map needs a single-band bathymetry raster.');
+      const rowsNative = georaster.values?.[0];
+      if (!rowsNative || rowsNative.length !== georaster.height || rowsNative[0]?.length !== georaster.width)
+        throw new Error('Native bathymetry samples are unavailable. Upload a smaller single-band bathymetry GeoTIFF.');
+      const native = coverageRasterTransform(georaster);
+      const polygonPx = transformSurveyIntoRasterPixels(sourceData, georaster);
+      const vertices = polygonPx.flat(2);
+      if (!vertices.length) throw new Error('Survey polygon is empty.');
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      for (const [x,y] of vertices) {
+        minX=Math.min(minX,x); minY=Math.min(minY,y);
+        maxX=Math.max(maxX,x); maxY=Math.max(maxY,y);
+      }
+      let left=Math.max(0,Math.floor(minX)), top=Math.max(0,Math.floor(minY));
+      let right=Math.min(georaster.width,Math.ceil(maxX));
+      let bottom=Math.min(georaster.height,Math.ceil(maxY));
+      if (right <= left || bottom <= top) throw new Error('Survey polygon does not intersect the selected bathymetry TIFF.');
+      // Hard guard for browser memory and runtime. Keep the geographic bounds
+      // while resampling very large source rasters to <=1.5M output cells.
+      const factor = Math.max(1,Math.ceil(Math.sqrt((right-left)*(bottom-top)/1500000)));
+      const width = Math.ceil((right-left)/factor), height = Math.ceil((bottom-top)/factor);
+      const count = new Uint8Array(width*height), stamp = new Uint32Array(width*height);
+      const outPolygon = polygonPx.map(poly => poly.map(ring => ring.map(([x,y]) => [(x-left)/factor,(y-top)/factor])));
+      const planCRS = projectedSurveyPolygons(sourceData).projection;
+      const noData = georaster.noDataValue == null || georaster.noDataValue === '' ? null : Number(georaster.noDataValue);
+      const portTan = Math.tan(portAngle*Math.PI/180), starTan = Math.tan(starboardAngle*Math.PI/180);
+      const rawSample = (localPoint) => {
+        const [x,y] = native.toPixel(planCRS.inverse(localPoint));
+        const column = Math.floor(x), row = Math.floor(y);
+        if (column < 0 || row < 0 || column >= georaster.width || row >= georaster.height) return NaN;
+        const raw = rowsNative[row]?.[column];
+        return isValidPixel(raw,noData) ? Math.abs(raw) : NaN;
+      };
+      const outputPixel = local => {
+        const [x,y] = native.toPixel(planCRS.inverse(local));
+        return [(x-left)/factor,(y-top)/factor];
+      };
+      // Estimate real pixel size at study-area centre to sample at a useful
+      // bathymetry scale, with a 2–20 m interval and 4,000 samples/line limit.
+      const reference = planCRS.forward(linesGeojson.features[0].geometry.coordinates[0]);
+      const nativeUnitMeters = (() => {
+        const referenceGeo=planCRS.inverse(reference);
+        const delta = native.code === '4326'
+          ? Math.min(native.pixelWidth*111320*Math.cos(referenceGeo[1]*Math.PI/180),native.pixelHeight*111132)
+          : Math.min(native.pixelWidth,native.pixelHeight);
+        return Math.max(1,Math.abs(delta));
+      })();
+      const step = Math.max(2,Math.min(20,nativeUnitMeters));
+      let usableLines = 0, gapsOnTracks = 0;
+      for (const [index,feature] of linesGeojson.features.entries()) {
+        const geoCoords = feature.geometry?.coordinates;
+        if (!Array.isArray(geoCoords) || geoCoords.length < 2) continue;
+        const points = geoCoords.map(pos => planCRS.forward(pos));
+        const dist = points.slice(1).reduce((sum,p,i) => sum+Math.hypot(p[0]-points[i][0],p[1]-points[i][1]),0);
+        const sampleStep = Math.max(step,dist/4000);
+        const samples = [];
+        for (let i=0;i<points.length-1;i++) {
+          const a=points[i], b=points[i+1], length=Math.hypot(b[0]-a[0],b[1]-a[1]);
+          const n=Math.max(1,Math.ceil(length/sampleStep));
+          for (let k=0;k<n;k++) {
+            const f=k/n;
+            const pos=[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f];
+            samples.push({pos,depth:rawSample(pos)});
+          }
+        }
+        const last=points[points.length-1]; samples.push({pos:last,depth:rawSample(last)});
+        let painted=false;
+        for (let i=0;i<samples.length;i++) {
+          const sample=samples[i];
+          const prev=samples[Math.max(0,i-1)].pos, next=samples[Math.min(samples.length-1,i+1)].pos;
+          const length=Math.hypot(next[0]-prev[0],next[1]-prev[1]);
+          if (!(sample.depth>0) || !(length>0)) { gapsOnTracks++; continue; }
+          const leftX=-(next[1]-prev[1])/length, leftY=(next[0]-prev[0])/length;
+          const p=sample.depth*portTan, st=sample.depth*starTan;
+          sample.port=outputPixel([sample.pos[0]+leftX*p,sample.pos[1]+leftY*p]);
+          sample.star=outputPixel([sample.pos[0]-leftX*st,sample.pos[1]-leftY*st]);
+        }
+        for (let i=0;i<samples.length-1;i++) {
+          const a=samples[i],b=samples[i+1];
+          if (!a.port || !a.star || !b.port || !b.star) continue;
+          paintCoverageQuad([a.port,b.port,b.star,a.star],width,height,count,stamp,index+1);
+          painted=true;
+        }
+        if (painted) usableLines++;
+        if (index%8===0) await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      if (!usableLines) throw new Error('No valid depths found along survey lines. Check bathymetry extent, NoData and the vertical reference.');
+      const result=new Uint8Array(width*height);
+      let red=0,yellow=0,green=0,invalid=0;
+      for (let r=0;r<height;r++) {
+        const nativeRow=Math.min(georaster.height-1,Math.floor(top+(r+0.5)*factor));
+        for (let c=0;c<width;c++) {
+          if (!pixelInSurvey(c+0.5,r+0.5,outPolygon)) continue;
+          const nativeCol=Math.min(georaster.width-1,Math.floor(left+(c+0.5)*factor));
+          const raw=rowsNative[nativeRow]?.[nativeCol];
+          if (!isValidPixel(raw,noData)) {invalid++;continue;}
+          const pos=r*width+c, category=count[pos]+1;
+          result[pos]=category;
+          if (category===1) red++;
+          else if (category===2) yellow++;
+          else green++;
+        }
+        if (r%65===0) await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      if (!red&&!yellow&&!green) throw new Error('No valid bathymetry pixels inside the selected polygon.');
+      const buffer=writeCoveragePaletteTIFF(result,width,height,
+        native.xmin+left*native.pixelWidth,native.ymax-top*native.pixelHeight,
+        native.pixelWidth*factor,native.pixelHeight*factor,native.code);
+      return {blob:new Blob([buffer],{type:'image/tiff'}),
+        filename:`${exportStem(name)}-projected-coverage.tif`,
+        stats:{width,height,factor,red,yellow,green,invalid,usableLines,gapsOnTracks},
+        bytes:buffer};
+    }
+
+    const coverageLegend = document.createElement('div');
+    coverageLegend.id='coverageLegend';
+    coverageLegend.className='coverage-legend';
+    coverageLegend.hidden=true;
+    coverageLegend.innerHTML='<strong>Projected coverage</strong><div class="coverage-key"><span class="coverage-swatch" style="background:#d63237"></span>No coverage</div><div class="coverage-key"><span class="coverage-swatch" style="background:#f6d539"></span>One survey line</div><div class="coverage-key"><span class="coverage-swatch" style="background:#26a05a"></span>Overlap (2+ lines)</div>';
+    map.getContainer().append(coverageLegend);
+    function updateCoverageLegend() {
+      coverageLegend.hidden = !Array.from(records.values()).some(rec =>
+        rec.sourceFormat==='coverage' && map.hasLayer(rec.layer));
+    }
+    async function addCoveragePreview(coverage, planLayer) {
+      if (typeof parseGeoraster !== 'function' || typeof GeoRasterLayer !== 'function') return;
+      const raster=await parseGeoraster(await coverage.blob.arrayBuffer());
+      const preview=new GeoRasterLayer({georaster:raster,opacity:0.8,resolution:128,
+        pixelValuesToColorFn: values => {
+          const value=values?.[0];
+          return value===1?'#d63237':value===2?'#f6d539':value===3?'#26a05a':null;
+        }});
+      const bounds=preview.getBounds();
+      if (!validBounds(bounds)) throw new Error('Coverage TIFF bounds cannot be displayed.');
+      registerLayer(coverage.filename,'Projected coverage · 0 NoData · 1 red · 2 yellow · 3 green',
+        preview,bounds,null,true,'coverage');
+      planLayer.bringToFront();
+      updateCoverageLegend();
+    }
+    // -- End projected coverage -----------------------------------------------
+
+    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes, optimization = null, coverage = null) {
       const planNumber = nextPlanId++;
       const id = String(planNumber);
       const lineEntries = new Map();
@@ -1621,6 +1937,7 @@
         </div>
         <div class="planned-details" hidden>
           <p class="planned-summary"></p>
+          <button type="button" class="planned-coverage-download" hidden>↓ Download projected coverage GeoTIFF</button>
           <div class="planned-selection-tools">
             <span class="planned-selected-count"></span>
             <button type="button" class="planned-delete-selected" disabled>Delete selected</button>
@@ -1641,8 +1958,9 @@
         line.row = row;
         lineList.append(row);
       }
-      const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization,
+      const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization, coverage,
         speedKnots, turnMinutes, layer, bounds, lines: lineEntries, element: item, details };
+      if (coverage) item.querySelector('.planned-coverage-download').hidden = false;
       plannedRecords.set(id, record);
       plannedLinesEl.append(item);
       refreshPlanSummary(record);
@@ -1652,8 +1970,11 @@
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
     }
 
-    function drawSurveyLines() {
+    async function drawSurveyLines() {
       surveyErrorEl.hidden = true;
+      if (drawSurveyBtn.disabled) return;
+      drawSurveyBtn.disabled = true;
+      const oldLabel=drawSurveyBtn.textContent;
       try {
         const record = selectedSurveyAreaRecord();
         if (!validSurveyArea(record)) throw new Error('Select an imported shapefile or a created polygon as the Survey Area.');
@@ -1701,12 +2022,32 @@
         } else {
           result = generateSurveyGeometry(record.sourceData, spacing, bearing);
         }
-        registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes, optimization);
+        let coverage = null;
+        if (generateCoverageMapEl.checked) {
+          const bathy = activeBathymetryLayer();
+          if (!bathy || bathy.rec.rasterConfig.georaster.numberOfRasters !== 1)
+            throw new Error('Select a single-band bathymetry TIFF for projected coverage.');
+          drawSurveyBtn.textContent = 'Calculating projected coverage…';
+          await new Promise(resolve => setTimeout(resolve,0));
+          coverage = await calculateProjectedCoverage(record.sourceData,result.geojson,
+            bathy.rec.rasterConfig.georaster,
+            readOptionalNumber(portBeamAngleValueEl),readOptionalNumber(starboardBeamAngleValueEl),planName);
+        }
+        registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes, optimization, coverage);
         closeSurveyModal();
+        if (coverage) {
+          downloadExportFile({filename:coverage.filename,blob:coverage.blob});
+          const latestPlan = Array.from(plannedRecords.values()).at(-1);
+          try { await addCoveragePreview(coverage,latestPlan.layer); }
+          catch (previewError) { console.warn('Coverage TIFF downloaded but map preview failed:',previewError); }
+        }
       } catch (err) {
         surveyErrorEl.textContent = err.message || 'Unable to draw survey lines.';
         surveyErrorEl.hidden = false;
         console.error('Survey planning error:', err);
+      } finally {
+        drawSurveyBtn.disabled=false;
+        drawSurveyBtn.textContent=oldLabel;
       }
     }
     drawSurveyBtn.addEventListener('click', drawSurveyLines);
@@ -1737,6 +2078,8 @@
         expand.textContent = next ? '▾' : '▸';
         expand.setAttribute('aria-label', next ? 'Collapse lines' : 'Expand lines');
         record.details.hidden = !next;
+      } else if (button.classList.contains('planned-coverage-download') && record.coverage) {
+        downloadExportFile({filename:record.coverage.filename,blob:record.coverage.blob});
       } else if (button.classList.contains('planned-stats')) {
         openPlanStatsModal(record.id);
       } else if (button.classList.contains('planned-zoom')) {
@@ -2373,6 +2716,7 @@
       refreshCreatedEmpty();
       updateSurveyAreaOptions();
       updateDepthSource();
+      updateCoverageAvailability();
     }
     createdLayersEl.addEventListener('change', event => {
       if (!event.target.matches('.visible')) return;
@@ -2481,6 +2825,7 @@
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
       if (rasterConfig) updateMapLegend();
       updateSurveyAreaOptions();
+      updateCoverageAvailability();
     }
 
     function addGeoJSON(data, filename, fromShapefile = false) {
@@ -2769,6 +3114,7 @@
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error('Raster extent is invalid or its CRS is unsupported. Reproject to EPSG:4326 in QGIS.');
       registerLayer(file.name, `Raster · EPSG:${String(georaster.projection).replace('EPSG:', '')}`, layer, bounds, rasterConfig);
+      updateCoverageAvailability();
       setStatus(`Loaded georeferenced raster ${file.name}. Use its ⋮ menu to choose a display type.`);
     }
 
@@ -2824,6 +3170,7 @@
       if (event.target.classList.contains('visible')) {
         if (event.target.checked) rec.layer.addTo(map);
         else map.removeLayer(rec.layer);
+        updateCoverageLegend();
       } else if (event.target.classList.contains('raster-type') && rec.rasterConfig) {
         // Ensure no more than one TIFF is marked Bathymetry. Newly selected wins.
         if (event.target.value === 'bathymetry') {
@@ -2838,6 +3185,7 @@
         rec.rasterConfig.type = event.target.value;
         applyRasterStyle(item, rec);
         updateDepthSource();
+        updateCoverageAvailability();
         setStatus(`${rec.name}: ${event.target.selectedOptions[0].textContent} display applied.`);
       }
     });
@@ -2868,10 +3216,12 @@
         map.removeLayer(rec.layer);
         records.delete(item.dataset.id);
         item.remove();
+        updateCoverageLegend();
         empty.style.display = records.size ? 'none' : 'block';
         updateMapLegend();
         updateSurveyAreaOptions();
         updateDepthSource();
+        updateCoverageAvailability();
       }
     });
     document.addEventListener('click', event => {
