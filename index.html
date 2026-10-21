@@ -12,6 +12,22 @@
     header { height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; color: white; background: #092d42; }
     header strong { font-size: 21px; letter-spacing: -.5px; }
     header span { font-size: 12px; opacity: .7; }
+    .header-actions { display: flex; align-items: center; gap: 16px; }
+    .plan-survey-btn { border: 0; border-radius: 7px; background: #f0a05c; color: #092d42; padding: 9px 16px; font-weight: 750; font-size: 13px; }
+    .plan-survey-btn:hover { background: #f7b57d; }
+    .plan-survey-btn:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+    .survey-modal-backdrop { position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center; background: rgba(7, 27, 41, .58); padding: 18px; }
+    .survey-modal-backdrop[hidden] { display: none; }
+    .survey-dialog { width: min(440px, 100%); max-height: calc(100dvh - 36px); overflow-y: auto; background: white; border-radius: 12px; box-shadow: 0 18px 60px rgba(0, 18, 29, .32); padding: 24px; }
+    .survey-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+    .survey-dialog-head h2 { margin: 0; font-size: 22px; }
+    .survey-close { border: none; background: #edf5f7; color: #315e70; border-radius: 6px; width: 34px; height: 34px; line-height: 1; font-size: 23px; }
+    .survey-close:hover { background: #dceaf0; }
+    .survey-dialog label { display: block; margin-bottom: 8px; font-weight: 700; font-size: 13px; }
+    .survey-area-select { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
+    .survey-area-select:disabled { background: #edf3f6; color: #728b98; }
+    .survey-dialog .survey-hint { margin: 10px 0 0; font-size: 12px; }
+    .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
     aside { background: white; padding: 22px; overflow-y: auto; border-right: 1px solid #dce6eb; }
     .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #618196; font-weight: 800; }
@@ -74,6 +90,9 @@
     .creator-credit strong { color: #17334b; }
     @media (max-width: 650px) {
       header { padding: 0 14px; }
+      .header-actions { gap: 9px; }
+      .plan-survey-btn { padding: 8px 10px; font-size: 12px; }
+      header span { font-size: 10px; }
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
       aside { order: 2; max-height: 47%; padding: 15px; border-right: 0; border-top: 1px solid #dce6eb; }
       .map-stage { order: 1; min-height: 53%; }
@@ -84,7 +103,10 @@
 <body>
   <header>
     <strong>◉ SurveyLine</strong>
-    <span>Mini GIS · Version 0.1.4</span>
+    <div class="header-actions">
+      <button id="planSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog">Plan Survey</button>
+      <span>Mini GIS · Version 0.1.3.1</span>
+    </div>
   </header>
   <div class="shell">
     <aside>
@@ -129,6 +151,20 @@
         <div class="legend-options" id="legendOptions" hidden></div>
       </section>
     </div>
+  </div>
+
+  <div class="survey-modal-backdrop" id="surveyModal" hidden>
+    <section class="survey-dialog" role="dialog" aria-modal="true" aria-labelledby="surveyDialogTitle">
+      <div class="survey-dialog-head">
+        <h2 id="surveyDialogTitle">Plan Survey</h2>
+        <button id="closeSurveyModal" class="survey-close" type="button" aria-label="Close Plan Survey window">×</button>
+      </div>
+      <label for="surveyAreaSelect">Survey Area</label>
+      <select id="surveyAreaSelect" class="survey-area-select" aria-describedby="surveyAreaHint">
+        <option value="">Select a shapefile…</option>
+      </select>
+      <p class="survey-hint" id="surveyAreaHint" hidden>No shapefiles loaded. Upload a zipped shapefile to select a survey area.</p>
+    </section>
   </div>
 
   <!-- Pinned dependencies: no build tools needed. An internet connection is required for the libraries and basemap. -->
@@ -187,6 +223,61 @@
     const legendEl = document.getElementById('mapLegend');
     const legendOptions = document.getElementById('legendOptions');
     const legendMore = document.getElementById('legendMore');
+    const surveyModal = document.getElementById('surveyModal');
+    const surveyAreaSelect = document.getElementById('surveyAreaSelect');
+    const surveyAreaHint = document.getElementById('surveyAreaHint');
+    const planSurveyBtn = document.getElementById('planSurveyBtn');
+    const closeSurveyModalBtn = document.getElementById('closeSurveyModal');
+
+    // Only shapefile ZIP imports appear here; GeoJSON and TIFF layers do not.
+    // Keep the selected layer by record ID so duplicate file names are safe.
+    function updateSurveyAreaOptions() {
+      const previous = surveyAreaSelect.value;
+      surveyAreaSelect.replaceChildren(new Option('Select a shapefile…', ''));
+      let count = 0;
+      for (const [id, record] of records) {
+        if (record.sourceFormat !== 'shapefile') continue;
+        surveyAreaSelect.add(new Option(record.name, id));
+        count++;
+      }
+      surveyAreaSelect.value = count && records.get(previous)?.sourceFormat === 'shapefile' ? previous : '';
+      surveyAreaSelect.disabled = count === 0;
+      surveyAreaHint.hidden = count > 0;
+    }
+
+    function openSurveyModal() {
+      updateSurveyAreaOptions();
+      surveyModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      (surveyAreaSelect.disabled ? closeSurveyModalBtn : surveyAreaSelect).focus();
+    }
+    function closeSurveyModal() {
+      if (surveyModal.hidden) return;
+      surveyModal.hidden = true;
+      document.body.style.overflow = '';
+      planSurveyBtn.focus();
+    }
+    planSurveyBtn.addEventListener('click', openSurveyModal);
+    closeSurveyModalBtn.addEventListener('click', closeSurveyModal);
+    surveyModal.addEventListener('click', event => {
+      if (event.target === surveyModal) closeSurveyModal();
+    });
+    surveyModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSurveyModal();
+      } else if (event.key === 'Tab') {
+        // Keep keyboard navigation within the modal until dismissed.
+        const first = closeSurveyModalBtn;
+        const last = surveyAreaSelect.disabled ? closeSurveyModalBtn : surveyAreaSelect;
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first.focus();
+        }
+      }
+    });
+
 
     function setStatus(message, isError = false) {
       status.textContent = message;
@@ -200,9 +291,9 @@
         bounds.getWest() >= -180 && bounds.getEast() <= 180;
     }
 
-    function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true) {
+    function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null) {
       const id = String(nextId++);
-      records.set(id, { name, kind, layer, bounds, rasterConfig });
+      records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat });
       if (visible) layer.addTo(map);
       const item = document.createElement('div');
       item.className = 'layer';
@@ -234,9 +325,10 @@
       empty.style.display = 'none';
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
       if (rasterConfig) updateMapLegend();
+      updateSurveyAreaOptions();
     }
 
-    function addGeoJSON(data, filename) {
+    function addGeoJSON(data, filename, fromShapefile = false) {
       const datasets = Array.isArray(data) ? data : [data];
       let count = 0;
       for (const dataset of datasets) {
@@ -252,7 +344,7 @@
           throw new Error('Layer coordinates are outside valid WGS84 longitude/latitude. Check that the ZIP includes a correct .prj file.');
         }
         const label = dataset.fileName || filename;
-        registerLayer(label, 'Vector layer', layer, bounds);
+        registerLayer(label, 'Vector layer', layer, bounds, null, true, fromShapefile ? 'shapefile' : 'geojson');
         count++;
       }
       return count;
@@ -261,7 +353,7 @@
     async function addShapefile(file) {
       if (typeof shp !== 'function') throw new Error('Shapefile reader did not load. Check your internet connection.');
       const result = await shp(await file.arrayBuffer());
-      const count = addGeoJSON(result, file.name);
+      const count = addGeoJSON(result, file.name, true);
       setStatus(`Loaded ${count} shapefile layer${count === 1 ? '' : 's'} from ${file.name}.`);
     }
 
@@ -422,11 +514,8 @@
       const limits = activeLimits(config);
       const positiveDepths = config.stretch.mono.low >= 0;
       const bathy = config.type === 'bathymetry';
-      // The legend endpoints must follow the displayed ramp, including inversion.
-      const normalLeftValue = bathy && !positiveDepths ? limits.high : limits.low;
-      const normalRightValue = bathy && !positiveDepths ? limits.low : limits.high;
-      const leftValue = config.inverted ? normalRightValue : normalLeftValue;
-      const rightValue = config.inverted ? normalLeftValue : normalRightValue;
+      const leftValue = bathy && !positiveDepths ? limits.high : limits.low;
+      const rightValue = bathy && !positiveDepths ? limits.low : limits.high;
       document.getElementById('legendName').textContent = rec.name;
       document.getElementById('legendName').title = rec.name;
       document.getElementById('legendKind').textContent = config.type;
@@ -482,18 +571,15 @@
       const right = menu.querySelector('.ramp-right');
       const note = menu.querySelector('.ramp-note');
       if (config.type === 'bathymetry') {
-        left.textContent = config.inverted ? 'Deep' : 'Shallow';
-        right.textContent = config.inverted ? 'Shallow' : 'Deep';
+        left.textContent = 'Shallow'; right.textContent = 'Deep';
         note.textContent = config.stretch.mono.low >= 0
           ? '2–98% stretch · assumes positive-down depths.'
           : '2–98% stretch · assumes negative elevations.';
       } else if (config.type === 'sidescan' || config.type === 'backscatter') {
-        left.textContent = config.inverted ? 'High' : 'Low';
-        right.textContent = config.inverted ? 'Low' : 'High';
+        left.textContent = 'Low'; right.textContent = 'High';
         note.textContent = '2–98% stretch · grayscale intensity.';
       } else {
-        left.textContent = config.inverted ? 'High' : 'Low';
-        right.textContent = config.inverted ? 'Low' : 'High';
+        left.textContent = 'Low'; right.textContent = 'High';
         note.textContent = 'Original TIFF display without percentile stretch.';
       }
     }
@@ -620,13 +706,17 @@
         item.remove();
         empty.style.display = records.size ? 'none' : 'block';
         updateMapLegend();
+        updateSurveyAreaOptions();
       }
     });
     document.addEventListener('click', event => {
       if (!event.target.closest('.layer-menu, .settings')) closeLayerMenus();
     });
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape') closeLayerMenus();
+      if (event.key === 'Escape') {
+        closeLayerMenus();
+        closeSurveyModal();
+      }
     });
     document.getElementById('clearAll').addEventListener('click', () => {
       for (const rec of records.values()) map.removeLayer(rec.layer);
@@ -634,6 +724,7 @@
       layersEl.replaceChildren();
       empty.style.display = 'block';
       updateMapLegend();
+      updateSurveyAreaOptions();
       setStatus('All user layers cleared.');
     });
   </script>
