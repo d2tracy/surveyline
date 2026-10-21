@@ -70,6 +70,24 @@
     .planned-line-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .planned-line-length { font-size: 10px; color: #839ba7; margin-left: auto; white-space: nowrap; }
 
+
+    /* Export popup uses the same visual language as Plan Survey. */
+    .export-action { padding-top: 12px; }
+    .export-action .plan-survey-btn { width: 100%; min-height: 43px; }
+    .export-description { font-size: 12px; color: #607f8f; line-height: 1.5; margin: -8px 0 18px; }
+    .export-field { margin-top: 17px; }
+    .export-field label { margin-bottom: 8px; }
+    .export-field .survey-area-select, .export-field .survey-name-input { width: 100%; }
+    .export-note { font-size: 11px; color: #678494; line-height: 1.45; margin: 13px 0 0; }
+    .export-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; margin-top: 20px; }
+    .export-button { width: 100%; border: none; border-radius: 7px; padding: 12px 9px; font-size: 13px; font-weight: 750; background: #ee9854; color: #082b3f; }
+    .export-button:hover { background: #f6ad71; }
+    .export-button.secondary { background: #e9f2f6; color: #1d556b; }
+    .export-button.secondary:hover { background: #d9eaf1; }
+    .export-button:disabled { opacity: .5; cursor: not-allowed; }
+    .export-message { margin: 15px 0 0; padding: 9px 11px; background: #edf7f8; border-radius: 6px; color: #245d66; font-size: 12px; line-height: 1.45; }
+    .export-message.error { background: #fff1ed; border: 1px solid #f4beb1; color: #a13627; }
+    .export-message[hidden] { display: none; }
     .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
     aside { background: white; padding: 22px; overflow-y: auto; border-right: 1px solid #dce6eb; }
@@ -150,7 +168,7 @@
   <header>
     <strong>◉ SurveyLine</strong>
     <div class="header-actions">
-      <span>Mini GIS · Version 1.6.3</span>
+      <span>Mini GIS · Version 1.6.4</span>
     </div>
   </header>
   <div class="shell">
@@ -181,6 +199,9 @@
         <div id="plannedEmpty" class="planned-empty">No survey lines drawn yet.</div>
         <div id="plannedLines"></div>
       </section>
+      <div class="export-action">
+        <button id="exportSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog" aria-controls="exportModal">Export Survey Lines</button>
+      </div>
       <footer>
         <div>EPSG:4326 longitude/latitude data display · Maps shown using standard web map projection</div>
         <div class="creator-credit">Webpage made and designed by <strong>Declan Tracy</strong></div>
@@ -268,6 +289,40 @@
       <button type="button" id="drawSurveyLines" class="survey-draw">Draw Survey Lines</button>
     </section>
   </div>
+ 
+  <div class="survey-modal-backdrop" id="exportModal" hidden>
+    <section class="survey-dialog" role="dialog" aria-modal="true" aria-labelledby="exportDialogTitle">
+      <div class="survey-dialog-head">
+        <h2 id="exportDialogTitle">Export Survey Lines</h2>
+        <button id="closeExportModal" class="survey-close" type="button" aria-label="Close Export Survey Lines window">×</button>
+      </div>
+      <p class="export-description">Save the remaining lines from a planned survey as a GPX track file or KML line file.</p>
+      <div class="export-field">
+        <label for="exportPlanSelect">Line Plan</label>
+        <select id="exportPlanSelect" class="survey-area-select">
+          <option value="">Select a line plan…</option>
+        </select>
+      </div>
+      <div class="export-field">
+        <label for="exportFormat">File Format</label>
+        <select id="exportFormat" class="survey-area-select">
+          <option value="gpx">GPX (.gpx)</option>
+          <option value="kml">KML (.kml)</option>
+        </select>
+      </div>
+      <div class="export-field">
+        <label for="exportFileName">File Name</label>
+        <input id="exportFileName" class="survey-name-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="Line Plan">
+      </div>
+      <p class="export-note" id="exportPlanNote">Only lines remaining in your plan are exported, including lines that are currently hidden. Coordinates use WGS84.</p>
+      <p class="export-message" id="exportMessage" role="status" aria-live="polite" hidden></p>
+      <div class="export-actions">
+        <button class="export-button" id="saveSurveyFile" type="button">Save As…</button>
+        <button class="export-button secondary" id="downloadSurveyFile" type="button">Download</button>
+      </div>
+      <p class="export-note">Save As… lets you choose a folder and file name in supported browsers (including Chrome on desktop). Download uses your browser's normal download location or prompt.</p>
+    </section>
+  </div>
 
   <!-- Pinned dependencies: no build tools needed. An internet connection is required for the libraries and basemap. -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -337,6 +392,16 @@
     const plannedEmpty = document.getElementById('plannedEmpty');
     const plannedRecords = new Map();
     let nextPlanId = 1;
+    const exportModal = document.getElementById('exportModal');
+    const exportSurveyBtn = document.getElementById('exportSurveyBtn');
+    const closeExportModalBtn = document.getElementById('closeExportModal');
+    const exportPlanSelect = document.getElementById('exportPlanSelect');
+    const exportFormatSelect = document.getElementById('exportFormat');
+    const exportFileName = document.getElementById('exportFileName');
+    const exportMessage = document.getElementById('exportMessage');
+    const saveSurveyFileBtn = document.getElementById('saveSurveyFile');
+    const downloadSurveyFileBtn = document.getElementById('downloadSurveyFile');
+
 
     // Only shapefile ZIP imports appear here; GeoJSON and TIFF layers do not.
     // Keep the selected layer by record ID so duplicate file names are safe.
@@ -835,6 +900,188 @@
     document.getElementById('clearPlanned').addEventListener('click', () => {
       for (const id of Array.from(plannedRecords.keys())) removeSurveyPlan(id);
     });
+    // --- Survey-plan GPX / KML export -------------------------------------------
+    // Browser-only export: no survey data is sent to a server.
+    function exportStem(value) {
+      return (String(value || '').trim()
+        .replace(/\.(?:gpx|kml)$/i, '')
+        .replace(/[\x00-\x1f\x7f<>:"/\\|?*]+/g, '_')
+        .replace(/[.\s]+$/g, '')
+        .slice(0, 110)) || 'Line Plan';
+    }
+
+    function refreshExportPlanOptions() {
+      const oldSelection = exportPlanSelect.value;
+      exportPlanSelect.replaceChildren(new Option('Select a line plan…', ''));
+      for (const [id, plan] of plannedRecords) {
+        if (!plan.lines.size) continue;
+        exportPlanSelect.add(new Option(`${plan.name} (${plan.lines.size} lines)`, id));
+      }
+      if (plannedRecords.get(oldSelection)?.lines.size) exportPlanSelect.value = oldSelection;
+      else if (exportPlanSelect.options.length > 1) exportPlanSelect.selectedIndex = 1;
+      exportPlanSelect.disabled = exportPlanSelect.options.length < 2;
+      const enabled = !exportPlanSelect.disabled;
+      saveSurveyFileBtn.disabled = !enabled;
+      downloadSurveyFileBtn.disabled = !enabled;
+      document.getElementById('exportPlanNote').textContent = enabled
+        ? 'Only lines remaining in the plan are exported, including hidden lines. Coordinates use WGS84.'
+        : 'No planned lines available. First generate a line plan using Plan Survey.';
+    }
+
+    function showExportMessage(message, isError = false) {
+      exportMessage.textContent = message;
+      exportMessage.classList.toggle('error', isError);
+      exportMessage.hidden = !message;
+    }
+
+    function openExportModal() {
+      refreshExportPlanOptions();
+      exportFileName.value = exportStem(plannedRecords.get(exportPlanSelect.value)?.name || 'Line Plan');
+      showExportMessage('');
+      exportModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      (exportPlanSelect.disabled ? closeExportModalBtn : exportPlanSelect).focus();
+    }
+    function closeExportModal() {
+      if (exportModal.hidden) return;
+      exportModal.hidden = true;
+      document.body.style.overflow = '';
+      exportSurveyBtn.focus();
+    }
+    exportSurveyBtn.addEventListener('click', openExportModal);
+    closeExportModalBtn.addEventListener('click', closeExportModal);
+    exportModal.addEventListener('click', event => {
+      if (event.target === exportModal) closeExportModal();
+    });
+    exportModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeExportModal();
+      } else if (event.key === 'Tab') {
+        const focusable = Array.from(exportModal.querySelectorAll('button, select, input'))
+          .filter(element => !element.disabled);
+        if (!focusable.length) return;
+        if (event.shiftKey && document.activeElement === focusable[0]) {
+          event.preventDefault(); focusable[focusable.length - 1].focus();
+        } else if (!event.shiftKey && document.activeElement === focusable[focusable.length - 1]) {
+          event.preventDefault(); focusable[0].focus();
+        }
+      }
+    });
+    exportPlanSelect.addEventListener('change', () => {
+      exportFileName.value = exportStem(plannedRecords.get(exportPlanSelect.value)?.name || 'Line Plan');
+      showExportMessage('');
+    });
+    exportFormatSelect.addEventListener('change', () => showExportMessage(''));
+
+    // Escape user-generated names for XML, and drop characters invalid in XML 1.0.
+    function xmlText(value) {
+      return String(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    }
+    function exportCoordinates(point) {
+      if (!Array.isArray(point) || point.length < 2) throw new Error('A line has invalid coordinate data.');
+      const lon = Number(point[0]), lat = Number(point[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat) || lon < -180 || lon > 180 || lat < -90 || lat > 90) {
+        throw new Error('A line contains coordinates outside the valid WGS84 range.');
+      }
+      return { lon: lon.toFixed(9), lat: lat.toFixed(9) };
+    }
+    function currentPlanExport() {
+      const plan = plannedRecords.get(exportPlanSelect.value);
+      if (!plan || !plan.lines.size) throw new Error('Choose a line plan containing survey lines.');
+      const lines = Array.from(plan.lines.values()).map(line => {
+        const geometry = line.layer.feature?.geometry;
+        if (geometry?.type !== 'LineString' || !Array.isArray(geometry.coordinates) || geometry.coordinates.length < 2) {
+          throw new Error(`${line.name} has invalid line geometry.`);
+        }
+        return { name: line.name, coords: geometry.coordinates.map(exportCoordinates) };
+      });
+      return { name: plan.name, lines };
+    }
+    function surveyGPX(plan) {
+      const tracks = plan.lines.map(line => [
+        '  <trk>', `    <name>${xmlText(line.name)}</name>`, '    <trkseg>',
+        ...line.coords.map(point => `      <trkpt lat="${point.lat}" lon="${point.lon}"/>`),
+        '    </trkseg>', '  </trk>'
+      ].join('\n')).join('\n');
+      return ['<?xml version="1.0" encoding="UTF-8"?>',
+        '<gpx version="1.1" creator="SurveyLine" xmlns="http://www.topografix.com/GPX/1/1">',
+        '  <metadata>', `    <name>${xmlText(plan.name)}</name>`, '  </metadata>',
+        tracks, '</gpx>'].join('\n');
+    }
+    function surveyKML(plan) {
+      const placemarks = plan.lines.map(line => [
+        '    <Placemark>', `      <name>${xmlText(line.name)}</name>`,
+        '      <LineString>', '        <tessellate>1</tessellate>',
+        `        <coordinates>${line.coords.map(point => `${point.lon},${point.lat}`).join(' ')}</coordinates>`,
+        '      </LineString>', '    </Placemark>'
+      ].join('\n')).join('\n');
+      return ['<?xml version="1.0" encoding="UTF-8"?>',
+        '<kml xmlns="http://www.opengis.net/kml/2.2">', '  <Document>',
+        `    <name>${xmlText(plan.name)}</name>`, placemarks, '  </Document>', '</kml>'].join('\n');
+    }
+    function getSurveyExportFile() {
+      const plan = currentPlanExport();
+      const format = exportFormatSelect.value;
+      if (format !== 'gpx' && format !== 'kml') throw new Error('Choose GPX or KML.');
+      const mime = format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
+      const xml = format === 'gpx' ? surveyGPX(plan) : surveyKML(plan);
+      return { filename: `${exportStem(exportFileName.value || plan.name)}.${format}`,
+        blob: new Blob([xml], { type: `${mime};charset=utf-8` }), mime,
+        format, count: plan.lines.length };
+    }
+    function downloadExportFile(file) {
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(file.blob);
+      link.href = url;
+      link.download = file.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
+    downloadSurveyFileBtn.addEventListener('click', () => {
+      try {
+        const file = getSurveyExportFile();
+        downloadExportFile(file);
+        showExportMessage(`Downloaded ${file.filename} with ${file.count} survey lines.`);
+      } catch (error) {
+        showExportMessage(error.message || 'Unable to export survey lines.', true);
+      }
+    });
+    saveSurveyFileBtn.addEventListener('click', async () => {
+      try {
+        const file = getSurveyExportFile();
+        if (typeof window.showSaveFilePicker !== 'function') {
+          downloadExportFile(file);
+          showExportMessage(`Save As is not supported by this browser. Downloaded ${file.filename}; your browser controls the destination folder.`);
+          return;
+        }
+        // The chooser is opened directly in the button-click handler, with no
+        // preceding await; otherwise the browser may reject the user gesture.
+        const handle = await window.showSaveFilePicker({
+          suggestedName: file.filename,
+          types: [{ description: file.format.toUpperCase() + ' survey lines',
+            accept: { [file.mime]: ['.' + file.format] } }]
+        });
+        const writable = await handle.createWritable();
+        try {
+          await writable.write(file.blob);
+          await writable.close();
+        } catch (err) {
+          try { await writable.abort(); } catch (_) { /* preserve original error */ }
+          throw err;
+        }
+        showExportMessage(`Saved ${file.count} survey lines as ${handle.name || file.filename}.`);
+      } catch (error) {
+        if (error.name === 'AbortError') return; // User cancelled the OS file picker.
+        showExportMessage((error.message || 'Unable to save the file.') + ' Try Download instead.', true);
+      }
+    });
+    // --- End survey-plan export -------------------------------------------------
+
     // --- End survey-line generation ---------------------------------------------
 
     function setStatus(message, isError = false) {
@@ -1276,6 +1523,7 @@
       if (event.key === 'Escape') {
         closeLayerMenus();
         closeSurveyModal();
+        closeExportModal();
       }
     });
     document.getElementById('clearAll').addEventListener('click', () => {
