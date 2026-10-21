@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SurveyLine</title>
+  <title>Bathylines</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root { --sidebar-width: 300px; font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; color: #17334b; background: #eef4f6; }
     * { box-sizing: border-box; }
     body { margin: 0; }
     header { height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; color: white; background: #092d42; }
-    /* Keep the original SurveyLine logo font; use Calibri everywhere else. */
+    /* Keep the original Bathylines logo font; use Calibri everywhere else. */
     header strong { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 21px; letter-spacing: -.5px; }
     .header-brand { display: flex; align-items: baseline; gap: 15px; min-width: 0; }
     .header-brand .header-credit { font-size: 13px; font-weight: 400; letter-spacing: normal; white-space: nowrap; opacity: .78; }
@@ -92,6 +92,13 @@
     .survey-dialog .survey-hint { margin: 10px 0 0; font-size: 12px; }
     .survey-draw { display: block; width: 100%; margin-top: 23px; padding: 13px 16px; border: none; border-radius: 7px; background: #ee9854; color: #082b3f; font-weight: 750; font-size: 14px; }
     .survey-draw:hover { background: #f6ad71; }
+    .optimization-settings { border: 1px solid #d9e6ed; background: #f7fafb; padding: 12px 14px 14px; margin: 19px 0 0; min-width: 0; }
+    .optimization-settings legend { padding: 0 6px; color: #17334b; font-size: 13px; font-weight: 700; }
+    .optimization-choice { display: flex !important; align-items: center; gap: 8px; font-weight: 650 !important; cursor: pointer; margin: 5px 0 0 !important; }
+    .optimization-choice input { margin: 0; accent-color: #d17b3d; }
+    .optimization-description { color: #597788; font-size: 12px; line-height: 1.4; margin: 5px 0 13px 23px; }
+    .optimization-caution { color: #925217; margin-bottom: 4px; }
+    .optimization-caution[hidden] { display: none; }
     .survey-error { padding: 10px 12px; border-radius: 7px; margin: 14px 0 0; background: #fff1ed; border: 1px solid #f4beb1; color: #a13627; font-size: 12px; line-height: 1.45; }
     .survey-error[hidden] { display: none; }
     /* Planned Lines uses the same unboxed section layout and typography as Imported Layers. */
@@ -260,11 +267,11 @@
 <body>
   <header>
     <div class="header-brand">
-      <strong>◉ SurveyLine</strong>
+      <strong>◉ Bathylines</strong>
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.18</span>
+      <span>Version 1.6.19</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -443,6 +450,14 @@
           </div>
         </div>
       </div>
+      <fieldset class="optimization-settings" aria-label="Survey line placement method">
+        <legend>Survey placement</legend>
+        <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="default" checked> Default</label>
+        <p class="optimization-description">Use the existing evenly spaced, centered survey line placement.</p>
+        <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="optimized"> Bathylines Optimized Survey</label>
+        <p class="optimization-description">Tests different starting offsets to find the lowest calculated survey time for your line spacing and orientation while checking simplified swath coverage; this does not optimize vessel routing.</p>
+        <p class="optimization-description optimization-caution" id="optimizationCaution" hidden>For manual spacing, the optimization assumes a usable swath equal to the specified line spacing; actual seafloor coverage must be verified.</p>
+      </fieldset>
       <p class="survey-error" id="surveyError" role="alert" hidden></p>
       <button type="button" id="drawSurveyLines" class="survey-draw">Draw Survey Lines</button>
     </section>
@@ -769,6 +784,15 @@
     let nextPlanId = 1;
     const surveySpeedValueEl = document.getElementById('surveySpeedValue');
     const turnTimeValueEl = document.getElementById('turnTimeValue');
+    const surveyPlacementRadios = Array.from(document.querySelectorAll('input[name="surveyPlacement"]'));
+    const optimizationCautionEl = document.getElementById('optimizationCaution');
+    const currentSurveyPlacement = () => surveyPlacementRadios.find(radio => radio.checked)?.value || 'default';
+    function updateOptimizationCaution() {
+      optimizationCautionEl.hidden = currentSurveyPlacement() !== 'optimized' || lineSpacingModeEl.value !== 'manual';
+    }
+    surveyPlacementRadios.forEach(radio => radio.addEventListener('change', updateOptimizationCaution));
+    lineSpacingModeEl.addEventListener('change', updateOptimizationCaution);
+    updateOptimizationCaution();
     const planStatsModal = document.getElementById('planStatsModal');
     const closePlanStatsModalBtn = document.getElementById('closePlanStatsModal');
     let activePlanStatsId = null;
@@ -819,7 +843,7 @@
     function refreshPlanStatsPopup() {
       const record = plannedRecords.get(activePlanStatsId);
       if (!record) { closePlanStatsModal(); return; }
-      document.getElementById('planStatsName').textContent = record.name;
+      document.getElementById('planStatsName').textContent = record.name + (record.optimization ? ' · Bathylines Optimized Survey' : '');
       const values = getPlanSummaryRows(record);
       planStatsFields.forEach(([_, id], i) => {
         document.getElementById(id).textContent = values[i];
@@ -1313,12 +1337,10 @@
       return merged;
     }
 
-    function generateSurveyGeometry(data, spacing, bearingDegrees) {
+    function surveyGridContext(data, bearingDegrees) {
       const { projected, projection, convergenceRadians } = projectedSurveyPolygons(data);
-      // Requested heading is TRUE north at the area's centroid. Correct for
-      // local grid convergence before constructing parallel projected lines.
+      // Correct heading to true north at the survey centroid.
       const angle = bearingDegrees * Math.PI / 180 + convergenceRadians;
-      // Along-track d follows the corrected grid bearing; n is perpendicular.
       const dx = Math.sin(angle), dy = Math.cos(angle);
       const nx = Math.cos(angle), ny = -Math.sin(angle);
       const shaped = projected.map(polygon => polygon.map(ring => ring.map(([x, y]) => ({
@@ -1326,17 +1348,141 @@
         v: x * dx + y * dy
       }))));
       const all = shaped.flat(2);
-      const across = all.map(point => point.u);
-      const minU = across.reduce((a, b) => Math.min(a, b), Infinity);
-      const maxU = across.reduce((a, b) => Math.max(a, b), -Infinity);
+      const minU = all.reduce((minimum, point) => Math.min(minimum, point.u), Infinity);
+      const maxU = all.reduce((maximum, point) => Math.max(maximum, point.u), -Infinity);
       const width = maxU - minU;
       if (!(width > 0.01)) throw new Error('The selected polygon is too narrow or invalid.');
-      // Ignore tiny floating-point noise at exact whole-number spacing ratios.
-      const numberOfLines = Math.max(1, Math.ceil(width / spacing - 1e-9));
+      return { projection, shaped, all, minU, maxU, width, dx, dy, nx, ny };
+    }
+
+    // Survey time model matches the plan summary: segments / vessel speed plus
+    // one fixed turn allowance between consecutive survey segments.
+    function evaluateSurveyOffset(context, spacing, phase, swathWidth, speedKnots, turnMinutes) {
+      const { shaped, minU, maxU, width } = context;
+      if (!Number.isFinite(phase) || phase < 0 || phase >= spacing || spacing > swathWidth + 1e-8) return null;
+      const firstU = minU + phase;
+      if (firstU >= maxU) return null;
+      const count = Math.floor((maxU - firstU) / spacing + 1e-10) + 1;
+      if (count > 2000) return null;
+      let firstActive = NaN, lastActive = NaN, previousActive = NaN;
+      let totalMeters = 0, segmentCount = 0;
+      const activeSegments = [];
+      for (let i = 0; i < count; i++) {
+        const u = firstU + i * spacing;
+        const segments = mergeSurveySegments(shaped.flatMap(polygon => lineSegmentsInPolygon(polygon, u)));
+        if (segments.length) {
+          if (!Number.isFinite(firstActive)) firstActive = u;
+          if (Number.isFinite(previousActive) && u - previousActive > swathWidth + 1e-6) return null;
+          previousActive = u;
+          lastActive = u;
+          segmentCount += segments.length;
+          for (const [v0, v1] of segments) {
+            totalMeters += v1 - v0;
+            activeSegments.push({ u, v0, v1 });
+          }
+        }
+      }
+      if (!segmentCount || segmentCount > 10000) return null;
+      // 1D cross-track swath coverage across the entire polygon width. This
+      // is a necessary coverage condition, not proof of 2D coverage for
+      // strongly concave polygons or variable depth / usable sonar swath.
+      const leftGap = firstActive - minU, rightGap = maxU - lastActive;
+      if (leftGap > swathWidth / 2 + 1e-6 || rightGap > swathWidth / 2 + 1e-6) return null;
+      // A finite set of interior cross-track and along-track probes catches
+      // many boundary swath gaps not detected by 1D extent checking alone.
+      // Probe sampling is still only an approximation to full 2D coverage.
+      const alongTolerance = Math.max(0.5, Math.min(2, swathWidth * 0.01));
+      for (const probe of context.coverageProbes || []) {
+        const covered = activeSegments.some(line =>
+          Math.abs(probe.u - line.u) <= swathWidth / 2 + 1e-7 &&
+          probe.v >= line.v0 - alongTolerance && probe.v <= line.v1 + alongTolerance);
+        if (!covered) return null;
+      }
+      const turns = Math.max(0, segmentCount - 1);
+      const minutes = totalMeters / (speedKnots * 1852) * 60 + turns * turnMinutes;
+      const margin = Math.min(swathWidth / 2 - leftGap, swathWidth / 2 - rightGap);
+      return { phase, minutes, totalMeters, segmentCount, turns, margin };
+    }
+
+    function optimizeSurveyOffset(context, spacing, swathWidth, speedKnots, turnMinutes) {
+      // Precompute the same sample points for every offset evaluated. Avoid
+      // repeated polygon boundary sampling during the optimization search.
+      const probeCount = Math.min(85, Math.max(14, Math.ceil(context.width / Math.max(swathWidth / 3, 1))));
+      context.coverageProbes = [];
+      for (let i = 0; i < probeCount; i++) {
+        const u = context.minU + context.width * (i + 0.5) / probeCount;
+        const spans = mergeSurveySegments(context.shaped.flatMap(polygon => lineSegmentsInPolygon(polygon, u)));
+        for (const [v0, v1] of spans) {
+          for (const fraction of [0.02, 0.1, 0.3, 0.5, 0.7, 0.9, 0.98]) {
+            context.coverageProbes.push({ u, v: v0 + (v1 - v0) * fraction });
+          }
+        }
+      }
+      if (context.coverageProbes.length > 6000) throw new Error('Survey polygon is too complex to optimize safely in the browser. Try splitting it into smaller polygons.');
+      if (swathWidth + 1e-8 < spacing) {
+        throw new Error('Bathylines Optimized Survey needs a usable swath at least as wide as the line spacing to model continuous coverage.');
+      }
+      if (context.width / spacing > 2000) throw new Error('Optimizing more than 2,000 passes is not supported; increase line spacing or split the area.');
+      const normalize = x => ((x % spacing) + spacing) % spacing;
+      const phases = new Map();
+      function addCandidate(value) {
+        if (!Number.isFinite(value)) return;
+        const phase = normalize(value);
+        phases.set(Math.round(phase * 1000000), phase);
+      }
+      // Uniform candidates plus polygon-vertex events where the number or
+      // lengths of clipped line segments can change discontinuously.
+      const vertexCount = context.all.length;
+      const targetUniform = vertexCount > 3000 ? 27 : vertexCount > 1000 ? 49 : 81;
+      const maxEvents = vertexCount > 3000 ? 24 : vertexCount > 1000 ? 48 : 96;
+      for (let i = 0; i < targetUniform; i++) addCandidate((i + 0.5) * spacing / targetUniform);
+      addCandidate(0.001); addCandidate(spacing - 0.001);
+      // Always compare against the existing centered/default grid phase when
+      // that layout also satisfies the modeled coverage constraints.
+      const defaultCount = Math.max(1, Math.ceil(context.width / spacing - 1e-9));
+      addCandidate((context.width - (defaultCount - 1) * spacing) / 2);
+      // Edge coverage feasibility changes at these phase values.
+      const boundaries = [swathWidth / 2, context.width - swathWidth / 2, context.width];
+      for (const value of boundaries) for (const delta of [-0.001, 0, 0.001]) addCandidate(value + delta);
+      const increment = Math.max(1, Math.ceil(vertexCount / maxEvents));
+      for (let i = 0; i < vertexCount; i += increment) {
+        const critical = context.all[i].u - context.minU;
+        for (const delta of [-0.001, 0.001]) addCandidate(critical + delta);
+      }
+      let tested = 0, valid = 0, best = null;
+      const evaluate = phase => {
+        if (phase >= spacing) return;
+        tested++;
+        const candidate = evaluateSurveyOffset(context, spacing, phase, swathWidth, speedKnots, turnMinutes);
+        if (!candidate) return;
+        valid++;
+        if (!best || candidate.minutes < best.minutes - 1e-7 ||
+            (Math.abs(candidate.minutes - best.minutes) <= 1e-7 && candidate.margin > best.margin)) best = candidate;
+      };
+      for (const phase of phases.values()) evaluate(phase);
+      if (!best) throw new Error('No valid optimized placement found under the constant-swath coverage model. Try a smaller spacing or check your survey polygon.');
+      // Refine around the best offset while retaining the other candidate
+      // layouts. This is a numerical search, not a general global guarantee.
+      let step = spacing / targetUniform;
+      for (let level = 0; level < 4; level++) {
+        const center = best.phase;
+        for (const fraction of [-1, -0.5, 0.5, 1]) evaluate(normalize(center + fraction * step));
+        step *= 0.25;
+      }
+      return { ...best, testedCandidates: tested, validCandidates: valid, swathWidth };
+    }
+
+    function generateSurveyGeometry(data, spacing, bearingDegrees, options = {}) {
+      const context = options.context || surveyGridContext(data, bearingDegrees);
+      const { projection, shaped, minU, maxU, width, dx, dy, nx, ny } = context;
+      // Preserve the unchanged default, centered-line placement behavior.
+      const numberOfLines = options.phase == null
+        ? Math.max(1, Math.ceil(width / spacing - 1e-9))
+        : Math.max(1, Math.floor((width - options.phase) / spacing + 1e-10) + 1);
       if (numberOfLines > 2000) throw new Error(`That spacing would generate ${numberOfLines.toLocaleString()} lines. Increase line spacing (maximum 2,000).`);
-      // Center the array with exactly the specified distance between lines.
-      // A single line goes through the middle for polygons narrower than spacing.
-      const firstU = (minU + maxU - (numberOfLines - 1) * spacing) / 2;
+      const firstU = options.phase == null
+        ? (minU + maxU - (numberOfLines - 1) * spacing) / 2
+        : minU + options.phase;
       const features = [];
       let totalMeters = 0;
       let totalVertices = 0;
@@ -1383,7 +1529,7 @@
       const passes = new Set(lines.map(line => line.passNumber)).size;
       const totalMeters = lines.reduce((sum, line) => sum + line.lengthMeters, 0);
       record.details.querySelector('.planned-summary').textContent =
-        `${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
+        `${record.optimization ? 'Bathylines Optimized · ' : ''}${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
       record.element.querySelector('.planned-name').title = `${record.name} (${record.sourceName})`;
       if (!planStatsModal.hidden && activePlanStatsId === record.id) refreshPlanStatsPopup();
     }
@@ -1440,7 +1586,7 @@
       refreshPlanSelection(record);
     }
 
-    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes) {
+    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes, optimization = null) {
       const planNumber = nextPlanId++;
       const id = String(planNumber);
       const lineEntries = new Map();
@@ -1495,7 +1641,7 @@
         line.row = row;
         lineList.append(row);
       }
-      const record = { id, name, sourceName, spacing, bearing: bearingDegrees,
+      const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization,
         speedKnots, turnMinutes, layer, bounds, lines: lineEntries, element: item, details };
       plannedRecords.set(id, record);
       plannedLinesEl.append(item);
@@ -1536,8 +1682,26 @@
           throw new Error('Turn time must be zero or more minutes.');
         }
         const planName = linePlanNameEl.value.trim().slice(0, 80) || 'Line Plan';
-        const result = generateSurveyGeometry(record.sourceData, spacing, bearing);
-        registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes);
+        let optimization = null;
+        let result;
+        if (currentSurveyPlacement() === 'optimized') {
+          if (!(speedKnots > 0) || !(turnMinutes >= 0)) {
+            throw new Error('Bathylines Optimized Survey requires both Survey Speed (knots) and Turn time (minutes) to minimize calculated survey time.');
+          }
+          // In manual spacing mode, the effective swath is unknown, so assume
+          // it equals spacing for the simplified coverage test. This does not
+          // certify sonar coverage. Calculated mode uses actual modeled swath.
+          const effectiveSwath = lineSpacingModeEl.value === 'swath'
+            ? computeSwathWidthMetres() : spacing;
+          if (!(effectiveSwath > 0)) throw new Error('Enter a valid effective swath width to optimize coverage.');
+          const context = surveyGridContext(record.sourceData, bearing);
+          optimization = optimizeSurveyOffset(context, spacing, effectiveSwath, speedKnots, turnMinutes);
+          result = generateSurveyGeometry(record.sourceData, spacing, bearing,
+            { context, phase: optimization.phase });
+        } else {
+          result = generateSurveyGeometry(record.sourceData, spacing, bearing);
+        }
+        registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes, optimization);
         closeSurveyModal();
       } catch (err) {
         surveyErrorEl.textContent = err.message || 'Unable to draw survey lines.';
@@ -1630,7 +1794,7 @@
     }
     function openExportModal() {
       refreshExportPlanOptions();
-      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'SurveyLine Map' : selectedExportPlan()?.name || 'Line Plan');
+      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'Bathylines Map' : selectedExportPlan()?.name || 'Line Plan');
       showExportMessage('');
       exportModal.hidden = false;
       document.body.style.overflow = 'hidden';
@@ -1666,7 +1830,7 @@
       refreshExportAvailability();
     });
     exportFormatSelect.addEventListener('change', () => {
-      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'SurveyLine Map' : selectedExportPlan()?.name || 'Line Plan');
+      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'Bathylines Map' : selectedExportPlan()?.name || 'Line Plan');
       refreshExportAvailability();
       showExportMessage('');
     });
@@ -1681,7 +1845,7 @@
         pdf.setFillColor(9, 45, 66);
         pdf.rect(0, 0, 210, 36, 'F');
         pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(19); pdf.text('SurveyLine | Survey Plan Summary', 16, 21);
+        pdf.setFontSize(19); pdf.text('Bathylines | Survey Plan Summary', 16, 21);
         pdf.setTextColor(30, 62, 81); pdf.setFontSize(12);
         pdf.text(pdf.splitTextToSize(plan.name, 177), 16, 47);
         const rows = getPlanSummaryRows(plan);
@@ -1706,7 +1870,7 @@
         pdf.setTextColor(95, 117, 132);
         pdf.text(pdf.splitTextToSize(planStatsNote, 175), 16, y + 7);
         pdf.setFontSize(8.5);
-        pdf.text('Created by Declan Tracy  |  SurveyLine', 16, 286);
+        pdf.text('Created by Declan Tracy  |  Bathylines', 16, 286);
         pdf.save(`${exportStem(plan.name)}-summary.pdf`);
         showExportMessage(`Downloaded ${exportStem(plan.name)}-summary.pdf.`);
       } catch (error) {
@@ -1747,7 +1911,7 @@
         '    </trkseg>', '  </trk>'
       ].join('\n')).join('\n');
       return ['<?xml version="1.0" encoding="UTF-8"?>',
-        '<gpx version="1.1" creator="SurveyLine" xmlns="http://www.topografix.com/GPX/1/1">',
+        '<gpx version="1.1" creator="Bathylines" xmlns="http://www.topografix.com/GPX/1/1">',
         '  <metadata>', `    <name>${xmlText(plan.name)}</name>`, '  </metadata>',
         tracks, '</gpx>'].join('\n');
     }
@@ -1959,7 +2123,7 @@
       const scaleX = (projectedLowerRight.x - projectedTopLeft.x) / canvas.width;
       const scaleY = (projectedTopLeft.y - projectedLowerRight.y) / canvas.height;
       const tiff = writeGeoTIFF(canvas, projectedTopLeft.x, projectedTopLeft.y, scaleX, scaleY);
-      return { filename: `${exportStem(exportFileName.value || 'SurveyLine Map')}.tif`,
+      return { filename: `${exportStem(exportFileName.value || 'Bathylines Map')}.tif`,
         blob: new Blob([tiff], {type:'image/tiff'}), mime:'image/tiff', format:'tif', count:0 };
     }
     async function currentExportFile() {
@@ -1984,7 +2148,7 @@
       saveSurveyFileBtn.disabled = true;
       const format = exportFormatSelect.value;
       const mapMode = format === 'tif';
-      const stem = exportStem(exportFileName.value || (mapMode ? 'SurveyLine Map' : selectedExportPlan()?.name));
+      const stem = exportStem(exportFileName.value || (mapMode ? 'Bathylines Map' : selectedExportPlan()?.name));
       const mime = mapMode ? 'image/tiff' : format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
       try {
         if (typeof window.showSaveFilePicker !== 'function') {
