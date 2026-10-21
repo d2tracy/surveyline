@@ -18,7 +18,7 @@
     .plan-survey-btn:focus-visible { outline: 2px solid white; outline-offset: 3px; }
     .survey-modal-backdrop { position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center; background: rgba(7, 27, 41, .58); padding: 18px; }
     .survey-modal-backdrop[hidden] { display: none; }
-    .survey-dialog { width: min(440px, 100%); max-height: calc(100dvh - 36px); overflow-y: auto; background: white; border-radius: 12px; box-shadow: 0 18px 60px rgba(0, 18, 29, .32); padding: 24px; }
+    .survey-dialog { width: min(470px, 100%); max-height: calc(100dvh - 36px); overflow-y: auto; background: white; border-radius: 12px; box-shadow: 0 18px 60px rgba(0, 18, 29, .32); padding: 24px; }
     .survey-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
     .survey-dialog-head h2 { margin: 0; font-size: 22px; }
     .survey-close { border: none; background: #edf5f7; color: #315e70; border-radius: 6px; width: 34px; height: 34px; line-height: 1; font-size: 23px; }
@@ -26,6 +26,12 @@
     .survey-dialog label { display: block; margin-bottom: 8px; font-weight: 700; font-size: 13px; }
     .survey-area-select { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
     .survey-area-select:disabled { background: #edf3f6; color: #728b98; }
+    .survey-parameters { margin-top: 18px; display: grid; gap: 17px; }
+    .survey-field label { display: block; margin-bottom: 8px; }
+    .survey-input-row { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 10px; }
+    .survey-parameter-select, .survey-parameter-input { width: 100%; min-width: 0; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
+    .survey-parameter-input::placeholder { color: #8399a5; }
+    .survey-parameter-select:focus-visible, .survey-parameter-input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .survey-dialog .survey-hint { margin: 10px 0 0; font-size: 12px; }
     .survey-dialog button:focus-visible, .survey-area-select:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: 300px minmax(0,1fr); height: calc(100vh - 60px); min-height: 480px; }
@@ -107,7 +113,7 @@
   <header>
     <strong>◉ SurveyLine</strong>
     <div class="header-actions">
-      <span>Mini GIS · Version 0.1.3.2</span>
+      <span>Mini GIS · Version 1.5</span>
     </div>
   </header>
   <div class="shell">
@@ -165,6 +171,53 @@
         <option value="">Select a shapefile…</option>
       </select>
       <p class="survey-hint" id="surveyAreaHint" hidden>No shapefiles loaded. Upload a zipped shapefile to select a survey area.</p>
+      <div class="survey-parameters" aria-label="Survey parameters">
+        <div class="survey-field">
+          <label for="swathWidthMode">Swath Width</label>
+          <div class="survey-input-row">
+            <select id="swathWidthMode" class="survey-parameter-select" aria-label="Swath Width option">
+              <option value="none">None</option>
+            </select>
+            <input id="swathWidthValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Swath Width manual value">
+          </div>
+        </div>
+        <div class="survey-field">
+          <label for="swathOverlapMode">Swath overlap</label>
+          <div class="survey-input-row">
+            <select id="swathOverlapMode" class="survey-parameter-select" aria-label="Swath overlap option">
+              <option value="none">None</option>
+            </select>
+            <input id="swathOverlapValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Swath overlap manual value">
+          </div>
+        </div>
+        <div class="survey-field">
+          <label for="lineSpacingMode">Line spacing</label>
+          <div class="survey-input-row">
+            <select id="lineSpacingMode" class="survey-parameter-select" aria-label="Line spacing option">
+              <option value="none">None</option>
+            </select>
+            <input id="lineSpacingValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Line spacing manual value">
+          </div>
+        </div>
+        <div class="survey-field">
+          <label for="lineOrientationMode">Line Orientation</label>
+          <div class="survey-input-row">
+            <select id="lineOrientationMode" class="survey-parameter-select" aria-label="Line Orientation option">
+              <option value="none">None</option>
+            </select>
+            <input id="lineOrientationValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Line Orientation manual value">
+          </div>
+        </div>
+        <div class="survey-field">
+          <label for="surveySpeedMode">Survey Speed</label>
+          <div class="survey-input-row">
+            <select id="surveySpeedMode" class="survey-parameter-select" aria-label="Survey Speed option">
+              <option value="none">None</option>
+            </select>
+            <input id="surveySpeedValue" class="survey-parameter-input" type="number" step="any" inputmode="decimal" placeholder="Enter value" aria-label="Survey Speed manual value">
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -268,9 +321,11 @@
         event.preventDefault();
         closeSurveyModal();
       } else if (event.key === 'Tab') {
-        // Keep keyboard navigation within the modal until dismissed.
-        const first = closeSurveyModalBtn;
-        const last = surveyAreaSelect.disabled ? closeSurveyModalBtn : surveyAreaSelect;
+        // Keep keyboard focus inside the popup, including the new manual fields.
+        const focusable = Array.from(surveyModal.querySelectorAll('button, select, input'))
+          .filter(element => !element.disabled);
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
         if (event.shiftKey && document.activeElement === first) {
           event.preventDefault(); last.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
