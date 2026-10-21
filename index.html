@@ -69,6 +69,8 @@
     .depth-calculate { margin-top: 0; overflow-wrap: anywhere; }
     .depth-calculate:disabled { background: #dfe9ee; color: #738e9c; cursor: not-allowed; }
     .depth-warning { margin: 12px 0 0; color: #657d8d; line-height: 1.5; font-size: 11px; }
+    .depth-apply { margin-top: 10px; }
+    .depth-apply[hidden] { display: none; }
     .survey-name-field { margin-top: 18px; }
     .survey-name-input { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: #17334b; border: 1px solid #b9d0db; border-radius: 7px; background: white; }
     .survey-name-input:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
@@ -216,7 +218,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.8</span>
+      <span>Version 1.6.9</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -370,11 +372,12 @@
         <h2 id="depthDialogTitle">Calculate Depth from Bathymetry</h2>
         <button id="closeDepthModal" class="survey-close" type="button" aria-label="Close depth calculator">×</button>
       </div>
-      <p class="depth-description">Calculate the <strong>mean of valid bathymetry pixel values inside your selected survey-area polygon</strong>. Only pixel centres inside the polygon count; NoData and polygon holes are excluded. The raster must be marked <strong>Bathymetry</strong> in Layers.</p>
+      <p class="depth-description">Calculate the mean of valid bathymetry pixel values inside your selected survey-area polygon. This mean value is calculated from a bathymetry TIFF layer that you have added to the project in the Layers panel. Only pixel centres inside the polygon count; NoData and polygon holes are excluded. The raster must be marked Bathymetry in Layers.</p>
       <div id="depthSource" class="depth-source" role="status"></div>
       <button id="calculateDepthFromRaster" class="survey-draw depth-calculate" type="button">Calculate from bathymetry layer</button>
       <p id="depthResult" class="depth-result" role="status" aria-live="polite" hidden></p>
-      <p class="depth-warning">Uses original raster numbers, not stretched display colors. Assumes bathymetry values are in metres: negative elevations are converted to positive water depths. This is a pixel-centre mean, not an area-weighted or vertical-datum-corrected sounding.</p>
+      <button id="applyCalculatedDepth" class="survey-draw depth-apply" type="button" hidden>Input water depth</button>
+      <p class="depth-warning">This is a pixel-centre mean, not an area-weighted or vertical-datum-corrected sounding.</p>
     </section>
   </div>
 
@@ -581,12 +584,14 @@
     const depthSourceEl = document.getElementById('depthSource');
     const depthResultEl = document.getElementById('depthResult');
     const calculateDepthFromRasterBtn = document.getElementById('calculateDepthFromRaster');
+    const applyCalculatedDepthBtn = document.getElementById('applyCalculatedDepth');
     const swathDepthValueEl = document.getElementById('swathDepthValue');
     const portBeamAngleValueEl = document.getElementById('portBeamAngleValue');
     const starboardBeamAngleValueEl = document.getElementById('starboardBeamAngleValue');
     let manualSpacingText = lineSpacingValueEl.value;
     let manualSwathText = swathWidthValueEl.value;
     let calculatedSpacingMetres = NaN;
+    let pendingCalculatedDepth = NaN;
 
     function readOptionalNumber(field) {
       return field.value.trim() === '' ? NaN : Number(field.value);
@@ -692,6 +697,11 @@
       depthResultEl.hidden = false;
       depthResultEl.classList.toggle('error', isError);
     }
+    function clearPendingCalculatedDepth() {
+      pendingCalculatedDepth = NaN;
+      applyCalculatedDepthBtn.hidden = true;
+      applyCalculatedDepthBtn.textContent = 'Input water depth';
+    }
     function updateDepthSource() {
       const active = activeBathymetryLayer();
       const selectedArea = records.get(surveyAreaSelect.value);
@@ -708,15 +718,23 @@
     function openDepthModal() {
       updateDepthSource();
       depthResultEl.hidden = true;
+      clearPendingCalculatedDepth();
       depthModal.hidden = false;
       closeDepthModalBtn.focus();
     }
     function closeDepthModal(restoreFocus = true) {
       depthModal.hidden = true;
+      clearPendingCalculatedDepth();
       if (restoreFocus && !surveyModal.hidden) calculateDepthBtn.focus();
     }
     calculateDepthBtn.addEventListener('click', openDepthModal);
     closeDepthModalBtn.addEventListener('click', () => closeDepthModal());
+    applyCalculatedDepthBtn.addEventListener('click', () => {
+      if (!(pendingCalculatedDepth > 0)) return;
+      swathDepthValueEl.value = String(Number(pendingCalculatedDepth.toFixed(3)));
+      updateSwathCalculation();
+      closeDepthModal();
+    });
     depthModal.addEventListener('click', event => {
       if (event.target === depthModal) closeDepthModal();
     });
@@ -834,6 +852,7 @@
       const selectedAreaId = surveyAreaSelect.value;
       calculateDepthFromRasterBtn.disabled = true;
       depthResultEl.hidden = true;
+      clearPendingCalculatedDepth();
       const oldText = calculateDepthFromRasterBtn.textContent;
       calculateDepthFromRasterBtn.textContent = 'Calculating…';
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -844,9 +863,10 @@
         }
         const depth = Math.abs(stats.mean);
         if (!(depth > 0)) throw new Error('Mean depth is zero; please check the TIFF values and vertical reference.');
-        swathDepthValueEl.value = String(Number(depth.toFixed(3)));
-        updateSwathCalculation();
-        showDepthResult(`Mean raster value: ${stats.mean.toFixed(3)} m. Water depth set to ${depth.toFixed(3)} m from ${stats.count.toLocaleString()} valid cell centres.${stats.invalid ? ` ${stats.invalid.toLocaleString()} NoData/invalid cells excluded.` : ''}`);
+        pendingCalculatedDepth = depth;
+        applyCalculatedDepthBtn.textContent = `Input water depth (${depth.toFixed(3)} m)`;
+        applyCalculatedDepthBtn.hidden = false;
+        showDepthResult(`Mean raster value: ${stats.mean.toFixed(3)} m. Calculated water depth: ${depth.toFixed(3)} m from ${stats.count.toLocaleString()} valid cell centres.${stats.invalid ? ` ${stats.invalid.toLocaleString()} NoData/invalid cells excluded.` : ''}`);
       } catch (error) {
         showDepthResult(error.message || 'Bathymetry mean calculation failed.', true);
       } finally {
