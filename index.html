@@ -11,7 +11,7 @@
     body { margin: 0; }
     header { height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; color: white; background: #092d42; }
     /* Keep the BathTub wordmark styling distinct; use Calibri everywhere else. */
-    header strong { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 26px; letter-spacing: -.5px; color: #ffffff; }
+    header strong { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 21px; letter-spacing: -.5px; color: #ffffff; }
     .brand-wordmark { display: inline-flex; align-items: center; gap: 10px; line-height: 1; }
     .brand-mark { display: inline-flex; width: 27px; height: 27px; color: #ffffff; flex: 0 0 auto; }
     .brand-mark svg { width: 100%; height: 100%; display: block; overflow: visible; }
@@ -19,7 +19,9 @@
     .header-brand .header-credit { font-size: 13px; font-weight: 400; letter-spacing: normal; white-space: nowrap; opacity: .78; }
     input, select, textarea, button { font-family: inherit; }
     .leaflet-container, .leaflet-control, .leaflet-tooltip, .leaflet-popup-content-wrapper { font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; }
-    header span { font-size: 12px; opacity: .7; }
+    /* Only the version label is subdued; never shrink or fade the BathTub logo. */
+    .header-actions > span { font-size: 12px; opacity: .7; }
+    .brand-wordmark > span { font-size: inherit; opacity: 1; color: #ffffff; }
     .header-actions { display: flex; align-items: center; gap: 16px; }
     .plan-survey-btn { border: 0; border-radius: 7px; background: #f0a05c; color: #092d42; padding: 9px 16px; font-weight: 750; font-size: 13px; }
     .plan-survey-btn:hover { background: #f7b57d; }
@@ -269,10 +271,10 @@
       header { padding: 0 14px; }
       .header-actions { gap: 9px; }
       .plan-survey-btn { padding: 8px 10px; font-size: 12px; }
-      header span { font-size: 10px; }
+      .header-actions > span { font-size: 10px; }
       .header-brand { gap: 7px; }
       .header-brand .header-credit { font-size: 10px; white-space: normal; }
-      header strong { font-size: 20px; }
+      header strong { font-size: 17px; }
       .brand-mark { width: 22px; height: 22px; }
       .sidebar-resizer { display: none; }
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
@@ -294,7 +296,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.24</span>
+      <span>Version 1.6.25</span>
     </div>
   </header>
   <div class="shell" id="appShell">
