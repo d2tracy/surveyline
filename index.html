@@ -127,6 +127,22 @@
     .optimization-caution { color: #925217; margin-bottom: 4px; }
     .optimization-caution[hidden] { display: none; }
     .coverage-tool-action { margin-top: 11px; }
+    #coverageLayersTitle { font-size: 16px; }
+    #clearCoverages { white-space: nowrap; }
+    .layer .download-coverage { white-space: nowrap; font-size: 10px; }
+    .coverage-summary-dialog { width: min(460px, 100%); }
+    .coverage-summary-name { font-size: 12px; color: #58798b; margin: -7px 0 16px; overflow-wrap: anywhere; }
+    .coverage-summary-table { border: 1px solid #dce8ee; }
+    .coverage-summary-row { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(0, .88fr) minmax(0,.52fr); gap: 9px; align-items: center; padding: 12px 10px; border-bottom: 1px solid #e7eef2; font-size: 12px; }
+    .coverage-summary-row:last-child { border-bottom: 0; }
+    .coverage-summary-row span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+    .coverage-summary-row strong { font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; color: #17334b; }
+    .coverage-summary-header { background: #f2f7f9; font-weight: 700; color: #476779; }
+    .coverage-summary-header span:not(:first-child) { text-align: right; }
+    .coverage-summary-total { background: #f7fafb; font-weight: 700; }
+    .coverage-summary-swatch { display: inline-block; width: 13px; height: 13px; flex: 0 0 13px; border: 1px solid #0002; }
+    .coverage-summary-note { font-size: 11px; line-height: 1.55; color: #607e8e; margin: 14px 0 0; }
+    .coverage-summary-dialog .survey-draw { margin-top: 18px; }
     .coverage-dialog-description { margin: 2px 0 17px; }
     .coverage-dialog-source { margin: 13px 0 0; font-size: 12px; line-height: 1.55; color: #577487; }
     .coverage-dialog-source strong { color: #17334b; }
@@ -135,8 +151,6 @@
     .coverage-classes { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 13px; font-size: 12px; color: #355d6e; }
     .coverage-classes span { display: inline-flex; align-items: center; gap: 5px; }
     .coverage-classes i { width: 12px; height: 12px; display: inline-block; border: 1px solid #0002; }
-    .planned-coverage-download { display: block; width: 100%; background: #e8f3f8; border: 1px solid #9abed1; color: #1c6184; font-size: 11px; text-align: left; font-weight: 700; margin: 6px 0 8px; padding: 8px 10px; cursor: pointer; }
-    .planned-coverage-download[hidden] { display: none; }
     .coverage-legend { position: absolute; right: 14px; bottom: 32px; z-index: 950; background: rgba(255,255,255,.96); border: 1px solid #b9d2df; padding: 9px 12px; box-shadow: 0 2px 12px #0d2e4120; font-size: 11px; color: #264b5e; }
     .coverage-legend[hidden] { display: none; }
     .coverage-legend strong { display: block; margin-bottom: 6px; font-size: 12px; }
@@ -353,7 +367,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7</span>
+      <span>Version 1.7.1</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -389,6 +403,11 @@
         <div id="plannedEmpty" class="planned-empty">No survey lines drawn yet.</div>
         <div id="plannedLines"></div>
         <button id="openProjectedCoverage" class="create-shape-btn coverage-tool-action" type="button" aria-haspopup="dialog" aria-controls="projectedCoverageModal">Calculate projected survey coverage</button>
+      </section>
+      <section class="section" aria-labelledby="coverageLayersTitle">
+        <div class="section-head"><h2 id="coverageLayersTitle">Projected Survey Coverages</h2><button class="text" id="clearCoverages" type="button">Clear all</button></div>
+        <div id="coverageEmpty" class="planned-empty">No projected coverage maps yet.</div>
+        <div id="coverageLayers"></div>
       </section>
       <div class="export-action">
         <button id="exportSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog" aria-controls="exportModal">Export Survey Lines</button>
@@ -655,9 +674,29 @@
         <span><i style="background:#f6d539"></i>Yellow: one survey line</span>
         <span><i style="background:#26a05a"></i>Green: overlap (2+ lines)</span>
       </div>
-      <p class="survey-hint">Only pixels inside the original survey polygon with valid bathymetry are classified. The result is a georeferenced, single-band, colour-palette GeoTIFF, downloaded and added to Imported Layers.</p>
+      <p class="survey-hint">Only pixels inside the original survey polygon with valid bathymetry are classified. The result is a georeferenced, single-band, colour-palette GeoTIFF, downloaded and added to Projected Survey Coverages.</p>
       <p id="projectedCoverageError" class="survey-error" role="alert" hidden></p>
       <button id="calculateProjectedCoverage" class="survey-draw" type="button">Calculate</button>
+    </section>
+  </div>
+
+  <!-- Coverage statistics for a calculated, classified GeoTIFF. -->
+  <div class="survey-modal-backdrop" id="coverageSummaryModal" hidden>
+    <section class="survey-dialog coverage-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="coverageSummaryTitle">
+      <div class="survey-dialog-head">
+        <h2 id="coverageSummaryTitle">Projected Survey Coverage Summary</h2>
+        <button id="closeCoverageSummary" class="survey-close" type="button" aria-label="Close coverage summary">×</button>
+      </div>
+      <p class="coverage-summary-name" id="coverageSummaryName"></p>
+      <div class="coverage-summary-table" role="table" aria-label="Projected coverage statistics">
+        <div class="coverage-summary-row coverage-summary-header" role="row"><span role="columnheader">Coverage type</span><span role="columnheader">Area</span><span role="columnheader">Share</span></div>
+        <div class="coverage-summary-row" role="row"><span role="cell"><i class="coverage-summary-swatch" style="background:#d63237"></i>No coverage</span><strong role="cell" id="coverageSummaryRedArea"></strong><strong role="cell" id="coverageSummaryRedPercent"></strong></div>
+        <div class="coverage-summary-row" role="row"><span role="cell"><i class="coverage-summary-swatch" style="background:#f6d539"></i>Single coverage</span><strong role="cell" id="coverageSummaryYellowArea"></strong><strong role="cell" id="coverageSummaryYellowPercent"></strong></div>
+        <div class="coverage-summary-row" role="row"><span role="cell"><i class="coverage-summary-swatch" style="background:#26a05a"></i>Overlap (2+ lines)</span><strong role="cell" id="coverageSummaryGreenArea"></strong><strong role="cell" id="coverageSummaryGreenPercent"></strong></div>
+        <div class="coverage-summary-row coverage-summary-total" role="row"><span role="cell">Total classified</span><strong role="cell" id="coverageSummaryTotalArea"></strong><strong role="cell">100%</strong></div>
+      </div>
+      <p class="coverage-summary-note">Areas are estimated from the GeoTIFF’s georeferenced pixel dimensions. Percentages refer only to valid classified cells within the survey polygon; cells outside it and NoData are excluded.</p>
+      <button class="survey-draw" id="coverageSummaryOk" type="button">OK</button>
     </section>
   </div>
 
@@ -764,6 +803,17 @@
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     L.control.scale({ imperial: false }).addTo(map);
+    // Fixed render order, independent of upload order or visibility toggles:
+    // basemap < imported TIFFs < imported vectors < created polygons < planned lines < coverage.
+    for (const [name, index] of [
+      ['importedRasterPane',360], ['importedVectorPane',420],
+      ['createdPane',440], ['plannedPane',460], ['coveragePane',490]
+    ]) {
+      const pane = map.createPane(name);
+      pane.style.zIndex = String(index);
+      // Raster previews should never block survey line interactions underneath.
+      if (name === 'coveragePane' || name === 'importedRasterPane') pane.style.pointerEvents = 'none';
+    }
 
     // The desktop workspace can be resized by dragging the splitter, just like a GIS layers dock.
     // Recalculate the Leaflet viewport after each width change so tiles and map interactions
@@ -859,6 +909,8 @@
     const fileInput = document.getElementById('files');
     const status = document.getElementById('status');
     const layersEl = document.getElementById('layers');
+    const coverageLayersEl = document.getElementById('coverageLayers');
+    const coverageEmptyEl = document.getElementById('coverageEmpty');
     const empty = document.getElementById('empty');
     const dropZone = document.getElementById('dropZone');
     const records = new Map();
@@ -2506,7 +2558,26 @@
       if (!usableLines) throw new Error('No valid depths found along survey lines. Check bathymetry extent, NoData and the vertical reference.');
       const result=new Uint8Array(width*height);
       let red=0,yellow=0,green=0,invalid=0;
+      const originX = native.xmin + left*native.pixelWidth;
+      const originY = native.ymax - top*native.pixelHeight;
+      const scaleX = native.pixelWidth*factor;
+      const scaleY = native.pixelHeight*factor;
+      // Approximate geodesic pixel area by row, rather than assuming that
+      // longitude degrees or distorted projected coordinates have metre units.
+      const areaKm2 = {red:0,yellow:0,green:0};
+      const areaAtRow = (row) => {
+        const x = originX + width*scaleX/2;
+        const y = originY - (row+0.5)*scaleY;
+        const west = native.toGeographic([x-scaleX/2,y]);
+        const east = native.toGeographic([x+scaleX/2,y]);
+        const north = native.toGeographic([x,y+scaleY/2]);
+        const south = native.toGeographic([x,y-scaleY/2]);
+        const metresX = map.distance([west[1],west[0]],[east[1],east[0]]);
+        const metresY = map.distance([north[1],north[0]],[south[1],south[0]]);
+        return metresX*metresY/1000000;
+      };
       for (let r=0;r<height;r++) {
+        let rowRed=0,rowYellow=0,rowGreen=0;
         const nativeRow=Math.min(georaster.height-1,Math.floor(top+(r+0.5)*factor));
         for (let c=0;c<width;c++) {
           if (!pixelInSurvey(c+0.5,r+0.5,outPolygon)) continue;
@@ -2515,28 +2586,70 @@
           if (!isValidPixel(raw,noData)) {invalid++;continue;}
           const pos=r*width+c, category=count[pos]+1;
           result[pos]=category;
-          if (category===1) red++;
-          else if (category===2) yellow++;
-          else green++;
+          if (category===1) {red++;rowRed++;}
+          else if (category===2) {yellow++;rowYellow++;}
+          else {green++;rowGreen++;}
+        }
+        if (rowRed || rowYellow || rowGreen) {
+          const pixelKm2 = areaAtRow(r);
+          areaKm2.red += rowRed*pixelKm2;
+          areaKm2.yellow += rowYellow*pixelKm2;
+          areaKm2.green += rowGreen*pixelKm2;
         }
         if (r%65===0) await new Promise(resolve=>setTimeout(resolve,0));
       }
       if (!red&&!yellow&&!green) throw new Error('No valid bathymetry pixels inside the selected polygon.');
-      const originX = native.xmin + left*native.pixelWidth;
-      const originY = native.ymax - top*native.pixelHeight;
-      const scaleX = native.pixelWidth*factor;
-      const scaleY = native.pixelHeight*factor;
       const buffer=writeCoveragePaletteTIFF(result,width,height,
         originX,originY,scaleX,scaleY,native.code,native.isGeographic);
       return {blob:new Blob([buffer],{type:'image/tiff'}),
         filename:`${exportStem(name)}-projected-coverage.tif`,
-        stats:{width,height,factor,red,yellow,green,invalid,usableLines,gapsOnTracks},
+        stats:{width,height,factor,red,yellow,green,invalid,usableLines,gapsOnTracks,areaKm2},
         // Keep the actual 0/1/2/3 classifications for the browser preview.
         // Do not re-decode the palette TIFF: its ColorMap is intended for GIS
         // software and some in-browser GeoTIFF paths reinterpret indexed data.
         preview:{pixels:result,width,height,originX,originY,scaleX,scaleY,code:Number(native.code)},
         bytes:buffer};
     }
+
+    const coverageSummaryModal = document.getElementById('coverageSummaryModal');
+    const coverageSummaryNameEl = document.getElementById('coverageSummaryName');
+    const closeCoverageSummaryBtn = document.getElementById('closeCoverageSummary');
+    const coverageSummaryOkBtn = document.getElementById('coverageSummaryOk');
+    let previousCoverageSummaryFocus = null;
+    function openCoverageSummary(rec) {
+      const areas = rec?.coverage?.stats?.areaKm2;
+      if (!areas) return;
+      const total = areas.red + areas.yellow + areas.green;
+      if (!(total>0)) return;
+      coverageSummaryNameEl.textContent = rec.name;
+      for (const [key,id] of [['red','Red'],['yellow','Yellow'],['green','Green']]) {
+        document.getElementById(`coverageSummary${id}Area`).textContent = `${areas[key].toFixed(3)} km²`;
+        document.getElementById(`coverageSummary${id}Percent`).textContent = `${(100*areas[key]/total).toFixed(1)}%`;
+      }
+      document.getElementById('coverageSummaryTotalArea').textContent = `${total.toFixed(3)} km²`;
+      previousCoverageSummaryFocus = document.activeElement;
+      coverageSummaryModal.hidden = false;
+      coverageSummaryOkBtn.focus();
+    }
+    function closeCoverageSummary() {
+      if (coverageSummaryModal.hidden) return;
+      coverageSummaryModal.hidden = true;
+      if (previousCoverageSummaryFocus?.isConnected) previousCoverageSummaryFocus.focus();
+      previousCoverageSummaryFocus = null;
+    }
+    closeCoverageSummaryBtn.addEventListener('click', closeCoverageSummary);
+    coverageSummaryOkBtn.addEventListener('click', closeCoverageSummary);
+    coverageSummaryModal.addEventListener('click', event=>{
+      if (event.target===coverageSummaryModal) closeCoverageSummary();
+    });
+    coverageSummaryModal.addEventListener('keydown', event=>{
+      if (event.key==='Escape') {event.preventDefault();event.stopPropagation();closeCoverageSummary();}
+      if (event.key==='Tab') {
+        const first=closeCoverageSummaryBtn,last=coverageSummaryOkBtn;
+        if (event.shiftKey && document.activeElement===first) {event.preventDefault();last.focus();}
+        if (!event.shiftKey && document.activeElement===last) {event.preventDefault();first.focus();}
+      }
+    });
 
     const coverageLegend = document.createElement('div');
     coverageLegend.id='coverageLegend';
@@ -2547,6 +2660,25 @@
     function updateCoverageLegend() {
       coverageLegend.hidden = !Array.from(records.values()).some(rec =>
         rec.sourceFormat==='coverage' && map.hasLayer(rec.layer));
+    }
+    function removeRegisteredLayer(id) {
+      const rec = records.get(id);
+      if (!rec) return;
+      map.removeLayer(rec.layer);
+      records.delete(id);
+      (rec.sourceFormat === 'coverage' ? coverageLayersEl : layersEl)
+        .querySelector(`[data-id="${id}"]`)?.remove();
+      if (rec.sourceFormat === 'coverage') {
+        for (const plan of plannedRecords.values()) {
+          if (plan.coverageLayerId === id) plan.coverageLayerId = null;
+        }
+      }
+      empty.style.display = [...records.values()].some(r => r.sourceFormat !== 'coverage') ? 'none' : 'block';
+      updateCoverageEmpty();
+      updateCoverageLegend();
+      updateMapLegend();
+      updateSurveyAreaOptions();
+      updateDepthSource();
     }
     async function addCoveragePreview(coverage, planLayer) {
       const info = coverage.preview;
@@ -2576,7 +2708,7 @@
           [originY-height*scaleY,originX],
           [originY,originX+width*scaleX]
         );
-        preview=L.imageOverlay(canvas.toDataURL('image/png'),bounds,{opacity:1,interactive:false});
+        preview=L.imageOverlay(canvas.toDataURL('image/png'),bounds,{opacity:1,interactive:false,pane:'coveragePane',className:'coverage-raster'});
       } else {
         // For projected bathymetry, let GeoRasterLayer reproject a raw
         // numerical GeoRaster in-browser. Avoid reading the palette TIFF.
@@ -2589,7 +2721,7 @@
           pixelWidth:scaleX, pixelHeight:scaleY,
           width,height,noDataValue:0
         });
-        preview=new GeoRasterLayer({georaster:raster,proj4,opacity:1,resolution:256,
+        preview=new GeoRasterLayer({georaster:raster,proj4,opacity:1,resolution:256,pane:'coveragePane',
           resampleMethod:'nearest',
           pixelValuesToColorFn: values => {
             const value=values?.[0];
@@ -2600,7 +2732,7 @@
       if (!validBounds(bounds)) throw new Error('Coverage TIFF bounds cannot be displayed.');
       const coverageLayerId = registerLayer(coverage.filename,'Projected coverage · 0 NoData · 1 red · 2 yellow · 3 green',
         preview,bounds,null,true,'coverage');
-      planLayer.bringToFront();
+      records.get(coverageLayerId).coverage = coverage;
       updateCoverageLegend();
       return coverageLayerId;
     }
@@ -2612,6 +2744,7 @@
       const lineEntries = new Map();
       let lineSequence = 0;
       const layer = L.geoJSON(result.geojson, {
+        pane: 'plannedPane',
         style: normalPlanStyle,
         onEachFeature(feature, surveyLine) {
           const sequence = ++lineSequence;
@@ -2641,8 +2774,7 @@
         </div>
         <div class="planned-details" hidden>
           <p class="planned-summary"></p>
-          <button type="button" class="planned-coverage-download" hidden>↓ Download projected coverage GeoTIFF</button>
-          <div class="planned-selection-tools">
+              <div class="planned-selection-tools">
             <span class="planned-selected-count"></span>
             <button type="button" class="planned-delete-selected" disabled>Delete selected</button>
           </div>
@@ -2665,7 +2797,6 @@
       const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization, coverage,
         areaGeojson, portAngle, starboardAngle, coverageLayerId: null,
         speedKnots, turnMinutes, manualSurveyMinutes, layer, bounds, lines: lineEntries, element: item, details };
-      if (coverage) item.querySelector('.planned-coverage-download').hidden = false;
       plannedRecords.set(id, record);
       plannedLinesEl.append(item);
       refreshPlanSummary(record);
@@ -2779,24 +2910,21 @@
         plan.coverage = coverage;
         plan.portAngle = portAngle;
         plan.starboardAngle = starboardAngle;
-        plan.element.querySelector('.planned-coverage-download').hidden = false;
         // Keep the ZIP-like standard download behavior from previous versions.
         downloadExportFile({filename:coverage.filename,blob:coverage.blob});
         closeProjectedCoverageModal(true);
         try {
           const newLayerId = await addCoveragePreview(coverage, plan.layer);
           // Recalculating a plan replaces its previous *preview*, not its data.
-          if (plan.coverageLayerId) {
-            const previous = records.get(plan.coverageLayerId);
-            if (previous) { map.removeLayer(previous.layer); records.delete(plan.coverageLayerId); }
-            layersEl.querySelector(`[data-id="${plan.coverageLayerId}"]`)?.remove();
-            updateCoverageLegend();
-          }
+          if (plan.coverageLayerId && plan.coverageLayerId !== newLayerId)
+            removeRegisteredLayer(plan.coverageLayerId);
           plan.coverageLayerId = newLayerId;
         } catch (previewError) {
           console.warn('Projected coverage downloaded, but preview could not be added:',previewError);
           setStatus(`Coverage TIFF downloaded. Map preview unavailable: ${previewError.message}`,true);
         }
+        // Show statistics even if an unsupported browser prevents map preview.
+        openCoverageSummary({name: coverage.filename, coverage});
       } catch (error) {
         projectedCoverageError.textContent = error.message || 'Projected coverage calculation failed.';
         projectedCoverageError.hidden = false;
@@ -2911,8 +3039,6 @@
         expand.textContent = next ? '▾' : '▸';
         expand.setAttribute('aria-label', next ? 'Collapse lines' : 'Expand lines');
         record.details.hidden = !next;
-      } else if (button.classList.contains('planned-coverage-download') && record.coverage) {
-        downloadExportFile({filename:record.coverage.filename,blob:record.coverage.blob});
       } else if (button.classList.contains('planned-stats')) {
         openPlanStatsModal(record.id);
       } else if (button.classList.contains('planned-zoom')) {
@@ -3153,7 +3279,10 @@
       if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
       ctx.fillStyle = '#dcebef'; ctx.fillRect(0, 0, width, height);
       const panes = map.getPanes();
-      const paneOrder = ['tilePane', 'overlayPane', 'shadowPane', 'markerPane'];
+      const paneOrder = [
+        'tilePane', 'importedRasterPane', 'overlayPane', 'importedVectorPane',
+        'createdPane', 'plannedPane', 'coveragePane', 'shadowPane', 'markerPane'
+      ];
       ctx.save(); ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.clip();
       for (const paneName of paneOrder) {
         const pane = panes[paneName];
@@ -3521,7 +3650,7 @@
     function registerCreatedPolygon(name, ring) {
       const id = `created-${nextCreatedId++}`;
       const sourceData = { type: 'Feature', properties: { NAME: name }, geometry: { type: 'Polygon', coordinates: [ring] } };
-      const layer = L.geoJSON(sourceData, { style: { color: '#187ba4', weight: 2.5, fillColor: '#40a0c3', fillOpacity: .16 } });
+      const layer = L.geoJSON(sourceData, { pane: 'createdPane', style: { color: '#187ba4', weight: 2.5, fillColor: '#40a0c3', fillOpacity: .16 } });
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error('Shape coordinates are outside valid WGS84 limits.');
       const rec = { id, name, layer, bounds, sourceFormat: 'created', sourceData };
@@ -3623,6 +3752,10 @@
     }
     // --- End created polygon layers ---------------------------------------------
 
+    function updateCoverageEmpty() {
+      coverageEmptyEl.hidden = [...records.values()].some(rec => rec.sourceFormat === 'coverage');
+    }
+
     function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null, sourceData = null) {
       const id = String(nextId++);
       records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat, sourceData });
@@ -3633,7 +3766,8 @@
       item.innerHTML = `
         <input class="visible" type="checkbox" checked aria-label="Toggle layer visibility">
         <div class="layer-name"><strong></strong><small></small></div>
-        <button class="settings" type="button" title="${rasterConfig ? 'Raster display settings' : 'Vector settings (coming soon)'}" aria-label="${rasterConfig ? 'Raster display settings' : 'Vector settings (coming soon)'}" aria-expanded="false">⋮</button>
+        <button class="settings" type="button" title="${sourceFormat === 'coverage' ? 'Coverage summary' : rasterConfig ? 'Raster display settings' : 'Vector settings (coming soon)'}" aria-label="${sourceFormat === 'coverage' ? 'Coverage summary' : rasterConfig ? 'Raster display settings' : 'Vector settings (coming soon)'}" aria-expanded="false">⋮</button>
+        ${sourceFormat === 'coverage' ? '<button class="download-coverage" type="button" title="Download coverage GeoTIFF" aria-label="Download coverage GeoTIFF">↓ TIFF</button>' : ''}
         <button class="zoom" type="button" title="Zoom to layer" aria-label="Zoom to layer">◎</button>
         <button class="remove" type="button" title="Remove layer" aria-label="Remove layer">×</button>
         ${rasterConfig ? `<div class="layer-menu" hidden>
@@ -3653,8 +3787,13 @@
       item.querySelector('strong').textContent = name;
       item.querySelector('small').textContent = kind;
       if (rasterConfig) updateRasterMenu(item, rasterConfig);
-      layersEl.prepend(item);
-      empty.style.display = 'none';
+      if (sourceFormat === 'coverage') {
+        coverageLayersEl.prepend(item);
+        updateCoverageEmpty();
+      } else {
+        layersEl.prepend(item);
+        empty.style.display = 'none';
+      }
       map.fitBounds(bounds.pad(0.12), { maxZoom: 15 });
       if (rasterConfig) updateMapLegend();
       updateSurveyAreaOptions();
@@ -3669,6 +3808,7 @@
           throw new Error('Input did not contain valid GeoJSON geometry.');
         }
         const layer = L.geoJSON(dataset, {
+          pane: 'importedVectorPane',
           style: { color: '#f18a3b', weight: 2.5, fillColor: '#f18a3b', fillOpacity: .13 },
           pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 5, color: '#d66b25', fillColor: '#f18a3b', fillOpacity: 0.8 })
         });
@@ -3944,6 +4084,7 @@
       const stretch = await computeRasterStretch(georaster);
       const rasterConfig = { georaster, min, max, stretch, type: 'none', inverted: false };
       const layer = new GeoRasterLayer({ georaster, proj4, opacity: 0.82, resolution: 128,
+        pane: 'importedRasterPane',
         pixelValuesToColorFn: makeRasterColorFn(rasterConfig) });
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error(`The raster bounds could not be mapped from EPSG:${rasterCRS.code}. Check the GeoTIFF georeferencing.`);
@@ -3989,7 +4130,7 @@
     });
 
     function closeLayerMenus(exceptItem = null) {
-      layersEl.querySelectorAll('.layer').forEach(item => {
+      document.querySelectorAll('#layers .layer, #coverageLayers .layer').forEach(item => {
         if (item === exceptItem) return;
         const menu = item.querySelector('.layer-menu');
         if (menu) menu.hidden = true;
@@ -3997,7 +4138,7 @@
       });
     }
 
-    layersEl.addEventListener('change', event => {
+    for (const layerList of [layersEl,coverageLayersEl]) layerList.addEventListener('change', event => {
       const item = event.target.closest('.layer');
       const rec = item && records.get(item.dataset.id);
       if (!rec) return;
@@ -4024,14 +4165,19 @@
         setStatus(`${rec.name}: ${event.target.selectedOptions[0].textContent} display applied.`);
       }
     });
-    layersEl.addEventListener('click', event => {
+    for (const layerList of [layersEl,coverageLayersEl]) layerList.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
       const item = button.closest('.layer');
       if (!item) return;
       const rec = records.get(item.dataset.id);
       if (!rec) return;
+      if (button.classList.contains('download-coverage') && rec.coverage) {
+        downloadExportFile({filename:rec.coverage.filename,blob:rec.coverage.blob});
+        return;
+      }
       if (button.classList.contains('settings')) {
+        if (rec.sourceFormat === 'coverage') {openCoverageSummary(rec);return;}
         if (!rec.rasterConfig) return; // Vector settings will come in a later version.
         const menu = item.querySelector('.layer-menu');
         const opening = menu.hidden;
@@ -4048,15 +4194,7 @@
       }
       if (button.classList.contains('zoom')) map.fitBounds(rec.bounds.pad(0.12), { maxZoom: 15 });
       if (button.classList.contains('remove')) {
-        map.removeLayer(rec.layer);
-        records.delete(item.dataset.id);
-        item.remove();
-        updateCoverageLegend();
-        empty.style.display = records.size ? 'none' : 'block';
-        updateMapLegend();
-        updateSurveyAreaOptions();
-        updateDepthSource();
-        
+        removeRegisteredLayer(item.dataset.id);
       }
     });
     document.addEventListener('click', event => {
@@ -4069,16 +4207,20 @@
         closeExportModal();
         closePlanStatsModal();
         closeProjectedCoverageModal();
+        closeCoverageSummary();
       }
     });
     document.getElementById('clearAll').addEventListener('click', () => {
-      for (const rec of records.values()) map.removeLayer(rec.layer);
-      records.clear();
-      layersEl.replaceChildren();
-      empty.style.display = 'block';
-      updateMapLegend();
-      updateSurveyAreaOptions();
-      setStatus('All user layers cleared.');
+      for (const [id,rec] of [...records]) {
+        if (rec.sourceFormat !== 'coverage') removeRegisteredLayer(id);
+      }
+      setStatus('Imported layers cleared.');
+    });
+    document.getElementById('clearCoverages').addEventListener('click', () => {
+      if (!coverageSummaryModal.hidden) closeCoverageSummary();
+      for (const [id,rec] of [...records]) {
+        if (rec.sourceFormat === 'coverage') removeRegisteredLayer(id);
+      }
     });
   </script>
 </body>
