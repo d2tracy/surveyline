@@ -106,6 +106,10 @@
     .orientation-suggestion { display: block; width: 100%; border: 1px solid #267eaa; padding: 12px 13px; margin-top: 11px; color: white; background: #2777a6; cursor: pointer; font-weight: 700; text-align: center; font-size: 13px; }
     .orientation-suggestion:hover { background: #17628e; }
     .orientation-suggestion:disabled { opacity: .55; cursor: not-allowed; }
+    .orientation-outline-button { display: block; width: 100%; border: 1px solid #267eaa; padding: 12px 13px; margin-top: 9px; color: #267eaa; background: #ffffff; cursor: pointer; font-weight: 700; text-align: center; font-size: 13px; }
+    .orientation-outline-button:hover { background: #eef6fa; }
+    .orientation-outline-button:disabled { opacity: .55; cursor: not-allowed; }
+    .orientation-outline-button[hidden] { display: none !important; }
     .depth-apply { margin-top: 10px; }
     .depth-apply[hidden] { display: none; }
     .survey-name-field { margin-top: 18px; }
@@ -346,7 +350,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.30</span>
+      <span>Version 1.6.31</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -610,7 +614,7 @@
   <div class="survey-modal-backdrop depth-backdrop" id="orientationModal" hidden>
     <section class="survey-dialog orientation-dialog" role="dialog" aria-modal="true" aria-labelledby="orientationDialogTitle" aria-describedby="orientationFootnote">
       <div class="survey-dialog-head">
-        <h2 id="orientationDialogTitle">Orientation Finder</h2>
+        <h2 id="orientationDialogTitle">BathTub Orientation Finder Tool</h2>
         <button id="closeOrientationFinder" class="survey-close" type="button" aria-label="Close Orientation Finder">×</button>
       </div>
       <div id="orientationSource" class="orientation-source" role="status"></div>
@@ -622,6 +626,7 @@
         <p class="orientation-summary-hint">Each displayed arrow has equal weight. Directions use a circular mean; slope is the average of each displayed zone’s mean slope angle.</p>
       </div>
       <button id="applySuggestedOrientation" class="orientation-suggestion" type="button" hidden>Use suggested line orientation</button>
+      <button id="showSuggestedOrientationOnShape" class="orientation-outline-button" type="button" hidden>Show suggested line orientation on shape</button>
       <p id="orientationFootnote" class="depth-warning">The suggested line orientation is perpendicular to mean downhill direction. Slope is calculated from the raster marked as bathymetry by the user. This tool is not recommended for highly irregular survey area shapes.</p>
     </section>
   </div>
@@ -862,8 +867,11 @@
     const orientationMeanDirectionEl = document.getElementById('orientationMeanDirection');
     const orientationMeanSlopeEl = document.getElementById('orientationMeanSlope');
     const applySuggestedOrientationBtn = document.getElementById('applySuggestedOrientation');
+    const showSuggestedOrientationBtn = document.getElementById('showSuggestedOrientationOnShape');
     let orientationFinderToken = 0;
     let pendingSuggestedOrientation = null;
+    let showSuggestedOrientationGuide = false;
+    let lastOrientationAnalysis = null;
     const calculateDepthBtn = document.getElementById('calculateDepthBtn');
     const closeDepthModalBtn = document.getElementById('closeDepthModal');
     const depthSourceEl = document.getElementById('depthSource');
@@ -1422,28 +1430,62 @@
       return {projected,zones,x0,y0,x1,y1,stride};
     }
 
-    function renderOrientationPreview(analysis) {
+
+    function orientationGuideMarkup(analysis, suggestedOrientation, projectToSvg) {
+      if (!(suggestedOrientation === 0 || suggestedOrientation)) return '';
+      const {x0,y0,x1,y1} = analysis;
+      const theta = suggestedOrientation * Math.PI / 180;
+      const dx = Math.sin(theta), dy = Math.cos(theta);
+      const nx = Math.cos(theta), ny = -Math.sin(theta);
+      const corners = [[x0,y0],[x0,y1],[x1,y0],[x1,y1]];
+      const projections = corners.map(([x,y]) => x * nx + y * ny);
+      const minProj = Math.min(...projections), maxProj = Math.max(...projections);
+      const centerProj = (minProj + maxProj) / 2;
+      const spread = Math.max(1, maxProj - minProj);
+      const lineCount = 6;
+      const diagonal = Math.hypot(x1 - x0, y1 - y0) * 1.3;
+      const offsets = Array.from({length: lineCount}, (_, i) => centerProj + ((i - (lineCount - 1) / 2) * spread / (lineCount + 1)));
+      return offsets.map(offset => {
+        const cx = nx * offset;
+        const cy = ny * offset;
+        const xA = cx - dx * diagonal;
+        const yA = cy - dy * diagonal;
+        const xB = cx + dx * diagonal;
+        const yB = cy + dy * diagonal;
+        const [sx1, sy1] = projectToSvg(xA, yA);
+        const [sx2, sy2] = projectToSvg(xB, yB);
+        return `<line x1="${sx1}" y1="${sy1}" x2="${sx2}" y2="${sy2}" stroke="#d84141" stroke-width="2" stroke-dasharray="7 6" stroke-linecap="round"/>`;
+      }).join('');
+    }
+
+    function renderOrientationPreview(analysis, suggestedOrientation = null, showGuides = false) {
       const {projected,zones,x0,y0,x1,y1}=analysis;
       const w=420,h=335,margin=30;
       const scale=Math.min((w-2*margin)/(x1-x0),(h-2*margin)/(y1-y0));
       const dx=(w-(x1-x0)*scale)/2, dy=(h-(y1-y0)*scale)/2;
       const sx=x=>dx+(x-x0)*scale, sy=y=>dy+(y1-y)*scale;
+      const projectToSvg=(x,y)=>[sx(x).toFixed(3), sy(y).toFixed(3)];
       const p=point=>`${sx(point[0]).toFixed(3)} ${sy(point[1]).toFixed(3)}`;
+      const clipPathData = projected.map(polygon =>
+        polygon.map(ring => ring.map((point,i)=>(i?'L':'M')+p(point)).join(' ')+' Z').join(' ')
+      ).join(' ');
       const outlines=projected.map(polygon=>{
         const parts=polygon.map(ring=>ring.map((point,i)=>(i?'L':'M')+p(point)).join(' ')+' Z');
-        return `<path d="${parts.join(' ')}" fill="#e7f1f5" fill-rule="evenodd" stroke="#2d758f" stroke-width="1.8"/>`;
+        return `<path d="${parts.join(' ')}" fill="#e7f1f5" fill-rule="evenodd" stroke="#111111" stroke-width="1.8"/>`;
       }).join('');
-      const arrows=zones.filter(zone=>zone.direction!==null &&
-        pixelInSurvey(zone.px,zone.py,projected)).map(zone=>{
+      const guideLines = showGuides && suggestedOrientation!==null
+        ? `<g clip-path="url(#orientationAreaClip)">${orientationGuideMarkup(analysis, suggestedOrientation, projectToSvg)}</g>`
+        : '';
+      const arrows=zones.filter(zone=>zone.direction!==null && pixelInSurvey(zone.px,zone.py,projected)).map(zone=>{
         const cx=sx(zone.px), cy=sy(zone.py);
         const theta=zone.direction*Math.PI/180;
         const east=Math.sin(theta), north=Math.cos(theta);
         const half=13;
         const xStart=cx-half*east,yStart=cy+half*north;
         const xEnd=cx+half*east,yEnd=cy-half*north;
-        return `<g><circle cx="${cx}" cy="${cy}" r="20" fill="white" fill-opacity=".9"/><line x1="${xStart}" y1="${yStart}" x2="${xEnd}" y2="${yEnd}" stroke="#c6732e" stroke-width="3.2" stroke-linecap="round" marker-end="url(#orientationArrowHead)"/><text x="${cx}" y="${cy+33}" text-anchor="middle" font-size="11" font-weight="700" fill="#315a6e">${Math.round(zone.direction)}°</text></g>`;
+        return `<g><line x1="${xStart}" y1="${yStart}" x2="${xEnd}" y2="${yEnd}" stroke="#c6732e" stroke-width="3.2" stroke-linecap="round" marker-end="url(#orientationArrowHead)"/><text x="${cx}" y="${cy+19}" text-anchor="middle" font-size="11" font-weight="700" fill="#315a6e">${Math.round(zone.direction)}°</text></g>`;
       }).join('');
-      orientationPreviewEl.innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Survey-area polygon and nine regional mean downhill slope directions"><defs><marker id="orientationArrowHead" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#c6732e"/></marker></defs>${outlines}${arrows}<text x="${w-13}" y="17" font-size="11" text-anchor="end" fill="#547386">N ↑</text></svg>`;
+      orientationPreviewEl.innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Survey-area polygon and nine regional mean downhill slope directions"><defs><marker id="orientationArrowHead" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#c6732e"/></marker><clipPath id="orientationAreaClip"><path d="${clipPathData}" fill-rule="evenodd"/></clipPath></defs>${outlines}${guideLines}${arrows}<text x="${w-13}" y="17" font-size="11" text-anchor="end" fill="#547386">N ↑</text></svg>`;
     }
 
     // Circular rather than arithmetic bearings: 359° and 1° average to 0°.
@@ -1466,6 +1508,8 @@
       orientationFinderToken++;
       orientationModal.hidden=true;
       pendingSuggestedOrientation=null;
+      showSuggestedOrientationGuide=false;
+      lastOrientationAnalysis=null;
       if (restoreFocus && !surveyModal.hidden) orientationFinderBtn.focus();
     }
     orientationFinderBtn.addEventListener('click', async () => {
@@ -1475,7 +1519,10 @@
       orientationPreviewEl.replaceChildren();
       orientationSummaryEl.hidden=true;
       applySuggestedOrientationBtn.hidden=true;
+      showSuggestedOrientationBtn.hidden=true;
       pendingSuggestedOrientation=null;
+      showSuggestedOrientationGuide=false;
+      lastOrientationAnalysis=null;
       orientationStatusEl.classList.remove('error');
       orientationStatusEl.hidden=false;
       orientationModal.hidden=false;
@@ -1508,8 +1555,9 @@
         if (request!==orientationFinderToken || orientationModal.hidden) return;
         if (surveyAreaSelect.value!==selectedId || activeBathymetryLayer()?.id!==rasterId)
           throw new Error('The selected survey area or bathymetry changed during calculation. Open the tool again.');
-        renderOrientationPreview(analysis);
+        lastOrientationAnalysis = analysis;
         const summary=summarizeOrientationArrows(analysis);
+        renderOrientationPreview(analysis, summary.suggested, showSuggestedOrientationGuide);
         // The preview and summary communicate results; omit the verbose status line.
         orientationStatusEl.textContent='';
         orientationStatusEl.hidden=true;
@@ -1521,6 +1569,8 @@
           if(summary.suggested!==null){
             pendingSuggestedOrientation=summary.suggested;
             applySuggestedOrientationBtn.hidden=false;
+            showSuggestedOrientationBtn.hidden=false;
+            showSuggestedOrientationBtn.textContent = showSuggestedOrientationGuide ? 'Hide suggested line orientation on shape' : 'Show suggested line orientation on shape';
             applySuggestedOrientationBtn.textContent=`Use suggested line orientation: ${summary.suggested.toFixed(1)}°`;
           }
         }
@@ -1540,6 +1590,15 @@
       closeOrientationFinder(false);
       input.focus();
     });
+    showSuggestedOrientationBtn.addEventListener('click',()=>{
+      if (!lastOrientationAnalysis || pendingSuggestedOrientation===null) return;
+      showSuggestedOrientationGuide = !showSuggestedOrientationGuide;
+      showSuggestedOrientationBtn.textContent = showSuggestedOrientationGuide
+        ? 'Hide suggested line orientation on shape'
+        : 'Show suggested line orientation on shape';
+      showSuggestedOrientationBtn.setAttribute('aria-pressed', showSuggestedOrientationGuide ? 'true' : 'false');
+      renderOrientationPreview(lastOrientationAnalysis, pendingSuggestedOrientation, showSuggestedOrientationGuide);
+    });
     closeOrientationFinderBtn.addEventListener('click',()=>closeOrientationFinder());
     orientationModal.addEventListener('click',event=>{
       if(event.target===orientationModal) closeOrientationFinder();
@@ -1547,7 +1606,7 @@
     orientationModal.addEventListener('keydown',event=>{
       if(event.key==='Escape') {event.preventDefault();event.stopPropagation();closeOrientationFinder();}
       else if(event.key==='Tab') {
-        const available=[closeOrientationFinderBtn,applySuggestedOrientationBtn].filter(el=>!el.hidden&&!el.disabled);
+        const available=[closeOrientationFinderBtn,applySuggestedOrientationBtn,showSuggestedOrientationBtn].filter(el=>!el.hidden&&!el.disabled);
         const first=available[0],last=available[available.length-1];
         if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
         else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
