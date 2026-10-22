@@ -367,7 +367,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.1</span>
+      <span>Version 1.7.2</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -402,15 +402,15 @@
         <div class="section-head"><h2 id="plannedTitle">Planned Lines</h2><button type="button" id="clearPlanned" class="text">Clear all</button></div>
         <div id="plannedEmpty" class="planned-empty">No survey lines drawn yet.</div>
         <div id="plannedLines"></div>
-        <button id="openProjectedCoverage" class="create-shape-btn coverage-tool-action" type="button" aria-haspopup="dialog" aria-controls="projectedCoverageModal">Calculate projected survey coverage</button>
       </section>
       <section class="section" aria-labelledby="coverageLayersTitle">
         <div class="section-head"><h2 id="coverageLayersTitle">Projected Survey Coverages</h2><button class="text" id="clearCoverages" type="button">Clear all</button></div>
         <div id="coverageEmpty" class="planned-empty">No projected coverage maps yet.</div>
         <div id="coverageLayers"></div>
+        <button id="openProjectedCoverage" class="create-shape-btn coverage-tool-action" type="button" aria-haspopup="dialog" aria-controls="projectedCoverageModal">Calculate projected survey coverage</button>
       </section>
       <div class="export-action">
-        <button id="exportSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog" aria-controls="exportModal">Export Survey Lines</button>
+        <button id="exportSurveyBtn" class="plan-survey-btn" type="button" aria-haspopup="dialog" aria-controls="exportModal">Export Survey</button>
       </div>
       <footer>
         <div>EPSG:4326 longitude/latitude data display</div>
@@ -674,7 +674,7 @@
         <span><i style="background:#f6d539"></i>Yellow: one survey line</span>
         <span><i style="background:#26a05a"></i>Green: overlap (2+ lines)</span>
       </div>
-      <p class="survey-hint">Only pixels inside the original survey polygon with valid bathymetry are classified. The result is a georeferenced, single-band, colour-palette GeoTIFF, downloaded and added to Projected Survey Coverages.</p>
+      <p class="survey-hint">Only pixels inside the original survey polygon with valid bathymetry are classified. The result is a georeferenced, single-band, colour-palette GeoTIFF added to Projected Survey Coverages. Download it using the ↓ TIFF button in that section.</p>
       <p id="projectedCoverageError" class="survey-error" role="alert" hidden></p>
       <button id="calculateProjectedCoverage" class="survey-draw" type="button">Calculate</button>
     </section>
@@ -724,12 +724,12 @@
   <div class="survey-modal-backdrop" id="exportModal" hidden>
     <section class="survey-dialog" role="dialog" aria-modal="true" aria-labelledby="exportDialogTitle">
       <div class="survey-dialog-head">
-        <h2 id="exportDialogTitle">Export Survey Lines</h2>
-        <button id="closeExportModal" class="survey-close" type="button" aria-label="Close Export Survey Lines window">×</button>
+        <h2 id="exportDialogTitle">Export Survey</h2>
+        <button id="closeExportModal" class="survey-close" type="button" aria-label="Close Export Survey window">×</button>
       </div>
       <p class="export-description">Export survey lines as GPX/KML, save the visible map as a georeferenced TIFF, or download a survey-plan summary PDF.</p>
       <div class="export-field">
-        <label for="exportPlanSelect">Line Plan</label>
+        <label for="exportPlanSelect">Line Plan to Export</label>
         <select id="exportPlanSelect" class="survey-area-select">
           <option value="">Select a line plan…</option>
         </select>
@@ -741,6 +741,13 @@
           <option value="kml">KML (.kml)</option>
           <option value="tif">Export view as GeoTIFF (.tif)</option>
         </select>
+      </div>
+      <div class="export-field">
+        <label for="exportCoverageSelect">Export Planned Survey Coverage (optional)</label>
+        <select id="exportCoverageSelect" class="survey-area-select" aria-describedby="exportCoverageHint">
+          <option value="">Do not include coverage TIFF</option>
+        </select>
+        <p class="export-note" id="exportCoverageHint">Only coverage maps generated from the selected line plan are available. Selecting one bundles its TIFF with the survey-plan PDF in a ZIP.</p>
       </div>
       <button id="exportPlanSummaryPdf" type="button" class="export-summary-pdf">Export Survey Plan Summary (PDF)</button>
       <div class="export-field">
@@ -1191,6 +1198,8 @@
     const closeExportModalBtn = document.getElementById('closeExportModal');
     const exportPlanSelect = document.getElementById('exportPlanSelect');
     const exportFormatSelect = document.getElementById('exportFormat');
+    const exportCoverageSelect = document.getElementById('exportCoverageSelect');
+    const exportCoverageHint = document.getElementById('exportCoverageHint');
     const exportFileName = document.getElementById('exportFileName');
     const exportMessage = document.getElementById('exportMessage');
     const saveSurveyFileBtn = document.getElementById('saveSurveyFile');
@@ -2910,18 +2919,21 @@
         plan.coverage = coverage;
         plan.portAngle = portAngle;
         plan.starboardAngle = starboardAngle;
-        // Keep the ZIP-like standard download behavior from previous versions.
-        downloadExportFile({filename:coverage.filename,blob:coverage.blob});
+        // Keep the generated TIFF in Projected Survey Coverages. Download is
+        // user-initiated via the layer's ↓ TIFF button or Export Survey.
         closeProjectedCoverageModal(true);
         try {
           const newLayerId = await addCoveragePreview(coverage, plan.layer);
+          // Use stable plan IDs rather than names: two plans may have the same name.
+          const previewRecord = records.get(newLayerId);
+          if (previewRecord) previewRecord.sourcePlanId = plan.id;
           // Recalculating a plan replaces its previous *preview*, not its data.
           if (plan.coverageLayerId && plan.coverageLayerId !== newLayerId)
             removeRegisteredLayer(plan.coverageLayerId);
           plan.coverageLayerId = newLayerId;
         } catch (previewError) {
-          console.warn('Projected coverage downloaded, but preview could not be added:',previewError);
-          setStatus(`Coverage TIFF downloaded. Map preview unavailable: ${previewError.message}`,true);
+          console.warn('Projected coverage was calculated, but preview could not be added:',previewError);
+          setStatus(`Coverage TIFF calculated, but map preview is unavailable: ${previewError.message}`,true);
         }
         // Show statistics even if an unsupported browser prevents map preview.
         openCoverageSummary({name: coverage.filename, coverage});
@@ -3064,6 +3076,36 @@
       const plan = plannedRecords.get(exportPlanSelect.value);
       return plan && plan.lines.size ? plan : null;
     }
+    // Only show currently registered coverage TIFFs that were calculated from
+    // this exact plan ID (never match plans by their potentially duplicate names).
+    function refreshExportCoverageOptions() {
+      const previous = exportCoverageSelect.value;
+      const plan = selectedExportPlan();
+      exportCoverageSelect.replaceChildren(new Option('Do not include coverage TIFF', ''));
+      if (plan) {
+        for (const [id, rec] of records) {
+          if (rec.sourceFormat !== 'coverage' || rec.sourcePlanId !== plan.id ||
+              !rec.coverage?.blob || !rec.coverage?.filename) continue;
+          exportCoverageSelect.add(new Option(rec.name, id));
+        }
+      }
+      if (previous && Array.from(exportCoverageSelect.options).some(o => o.value === previous))
+        exportCoverageSelect.value = previous;
+      exportCoverageSelect.disabled = !plan || exportCoverageSelect.options.length < 2;
+      exportCoverageHint.textContent = exportCoverageSelect.disabled
+        ? 'No projected coverage TIFF is available for this line plan. Calculate one first to include it with the PDF.'
+        : 'Optional: select a coverage TIFF generated from this line plan to export it with the PDF summary in one ZIP file.';
+    }
+    function selectedMatchingCoverage() {
+      const selected = exportCoverageSelect.value;
+      if (!selected) return null;
+      const plan = selectedExportPlan();
+      const rec = records.get(selected);
+      if (!plan || !rec || rec.sourceFormat !== 'coverage' || rec.sourcePlanId !== plan.id ||
+          !rec.coverage?.blob || !rec.coverage?.filename)
+        throw new Error('The selected coverage TIFF does not belong to this line plan. Please select a matching coverage.');
+      return rec.coverage;
+    }
     function refreshExportAvailability() {
       const hasPlan = !!selectedExportPlan();
       const mapMode = exportFormatSelect.value === 'tif';
@@ -3072,6 +3114,9 @@
       saveSurveyFileBtn.disabled = !mapMode && !hasPlan;
       downloadSurveyFileBtn.disabled = !mapMode && !hasPlan;
       exportPlanSummaryPdfBtn.disabled = !hasPlan;
+      exportPlanSummaryPdfBtn.textContent = exportCoverageSelect.value
+        ? 'Export Survey Plan Summary + Coverage (ZIP)'
+        : 'Export Survey Plan Summary (PDF)';
       document.getElementById('exportPlanNote').textContent = mapMode
         ? 'Exports the currently visible map with displayed layers in EPSG:3857 (Web Mercator). Map controls and the floating color legend are excluded. Requires readable map tiles.'
         : hasPlan
@@ -3087,6 +3132,7 @@
       }
       if (plannedRecords.get(oldSelection)?.lines.size) exportPlanSelect.value = oldSelection;
       else if (exportPlanSelect.options.length > 1) exportPlanSelect.selectedIndex = 1;
+      refreshExportCoverageOptions();
       refreshExportAvailability();
     }
     function showExportMessage(message, isError = false) {
@@ -3129,6 +3175,11 @@
     exportPlanSelect.addEventListener('change', () => {
       exportFileName.value = exportStem(selectedExportPlan()?.name || 'Line Plan');
       showExportMessage('');
+      refreshExportCoverageOptions();
+      refreshExportAvailability();
+    });
+    exportCoverageSelect.addEventListener('change', () => {
+      showExportMessage('');
       refreshExportAvailability();
     });
     exportFormatSelect.addEventListener('change', () => {
@@ -3138,11 +3189,15 @@
     });
 
     // Download a PDF with the exact same statistics as the three-dot summary.
-    exportPlanSummaryPdfBtn.addEventListener('click', () => {
+    exportPlanSummaryPdfBtn.addEventListener('click', async () => {
+      exportPlanSummaryPdfBtn.disabled = true;
       try {
         const plan = selectedExportPlan();
         if (!plan) throw new Error('Choose a survey plan to export its summary.');
+        const chosenCoverage = selectedMatchingCoverage();
         if (!window.jspdf?.jsPDF) throw new Error('The PDF library did not load. Check your connection and try again.');
+        if (chosenCoverage && typeof JSZip === 'undefined')
+          throw new Error('The ZIP library did not load. Check your connection and try again.');
         const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
         pdf.setFillColor(9, 45, 66);
         pdf.rect(0, 0, 210, 36, 'F');
@@ -3173,10 +3228,26 @@
         pdf.text(pdf.splitTextToSize(planStatsNote, 175), 16, y + 7);
         pdf.setFontSize(8.5);
         pdf.text('Created by Declan Tracy  |  BathTub', 16, 286);
-        pdf.save(`${exportStem(plan.name)}-summary.pdf`);
-        showExportMessage(`Downloaded ${exportStem(plan.name)}-summary.pdf.`);
+        const pdfName = `${exportStem(plan.name)}-summary.pdf`;
+        if (chosenCoverage) {
+          showExportMessage('Preparing PDF and matching coverage TIFF…');
+          const zip = new JSZip();
+          zip.file(pdfName, pdf.output('blob'));
+          zip.file(chosenCoverage.filename, chosenCoverage.blob);
+          const blob = await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:3}});
+          // The user gets both files reliably in one download rather than the
+          // browser potentially blocking multiple automatic downloads.
+          const zipName = `${exportStem(plan.name)}-summary-and-coverage.zip`;
+          downloadExportFile({filename:zipName,blob});
+          showExportMessage(`Downloaded ${zipName} with ${pdfName} and ${chosenCoverage.filename}.`);
+        } else {
+          pdf.save(pdfName);
+          showExportMessage(`Downloaded ${pdfName}.`);
+        }
       } catch (error) {
         showExportMessage(error.message || 'Unable to export the PDF summary.', true);
+      } finally {
+        refreshExportAvailability();
       }
     });
 
