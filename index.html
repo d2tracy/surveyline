@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bathtub</title>
+  <title>BathTub</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root { --sidebar-width: 300px; font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; color: #17334b; background: #eef4f6; }
     * { box-sizing: border-box; }
     body { margin: 0; }
     header { height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; color: white; background: #092d42; }
-    /* Keep the Bathtub wordmark styling distinct; use Calibri everywhere else. */
-    header strong { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 21px; letter-spacing: -.5px; }
+    /* Keep the BathTub wordmark styling distinct; use Calibri everywhere else. */
+    header strong { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 26px; letter-spacing: -.5px; color: #ffffff; }
     .brand-wordmark { display: inline-flex; align-items: center; gap: 10px; line-height: 1; }
     .brand-mark { display: inline-flex; width: 27px; height: 27px; color: #ffffff; flex: 0 0 auto; }
     .brand-mark svg { width: 100%; height: 100%; display: block; overflow: visible; }
@@ -272,7 +272,7 @@
       header span { font-size: 10px; }
       .header-brand { gap: 7px; }
       .header-brand .header-credit { font-size: 10px; white-space: normal; }
-      header strong { font-size: 17px; }
+      header strong { font-size: 20px; }
       .brand-mark { width: 22px; height: 22px; }
       .sidebar-resizer { display: none; }
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
@@ -286,17 +286,15 @@
   <header>
     <div class="header-brand">
       <strong class="brand-wordmark"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 64 64" fill="currentColor" role="img" aria-hidden="true">
-        <path d="M16 29h32v8c0 7-5 12-12 12H28c-7 0-12-5-12-12v-8Z"/>
-        <rect x="18" y="49" width="4" height="7" rx="0"/>
-        <rect x="42" y="49" width="4" height="7" rx="0"/>
-        <path d="M18 29 14 18h14l6 7 6-7h10v11Z"/>
-        <path d="M43 10h6c3.9 0 7 3.1 7 7v12h-5V17c0-1.1-.9-2-2-2h-6Z"/>
-        <path d="M36 12a3 3 0 1 0 0 6h9v-6Z"/>
-      </svg></span><span>Bathtub</span></strong>
+        <path d="M11 30h42v7c0 8-6 14-14 14H25c-8 0-14-6-14-14v-7Z"/>
+        <path d="M15 30h34c3 0 5-2 5-5v-3H10v3c0 3 2 5 5 5Z"/>
+        <rect x="18" y="50" width="4" height="7"/>
+        <rect x="42" y="50" width="4" height="7"/>
+      </svg></span><span>BathTub</span></strong>
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.23</span>
+      <span>Version 1.6.24</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -479,7 +477,7 @@
         <legend>Survey placement</legend>
         <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="default" checked> Default</label>
         <p class="optimization-description">Use the existing evenly spaced, centered survey line placement.</p>
-        <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="optimized"> Bathtub Optimized Survey</label>
+        <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="optimized"> BathTub Optimized Survey</label>
         <p class="optimization-description">Tests different starting offsets to find the lowest calculated survey time for your line spacing and orientation while checking simplified swath coverage; this does not optimize vessel routing.</p>
         <p class="optimization-description optimization-caution" id="optimizationCaution" hidden>For manual spacing, the optimization assumes a usable swath equal to the specified line spacing; actual seafloor coverage must be verified.</p>
       </fieldset>
@@ -878,7 +876,7 @@
     function refreshPlanStatsPopup() {
       const record = plannedRecords.get(activePlanStatsId);
       if (!record) { closePlanStatsModal(); return; }
-      document.getElementById('planStatsName').textContent = record.name + (record.optimization ? ' · Bathtub Optimized Survey' : '');
+      document.getElementById('planStatsName').textContent = record.name + (record.optimization ? ' · BathTub Optimized Survey' : '');
       const values = getPlanSummaryRows(record);
       planStatsFields.forEach(([_, id], i) => {
         document.getElementById(id).textContent = values[i];
@@ -1479,7 +1477,7 @@
       }
       if (context.coverageProbes.length > 6000) throw new Error('Survey polygon is too complex to optimize safely in the browser. Try splitting it into smaller polygons.');
       if (swathWidth + 1e-8 < spacing) {
-        throw new Error('Bathtub Optimized Survey needs a usable swath at least as wide as the line spacing to model continuous coverage.');
+        throw new Error('BathTub Optimized Survey needs a usable swath at least as wide as the line spacing to model continuous coverage.');
       }
       if (context.width / spacing > 2000) throw new Error('Optimizing more than 2,000 passes is not supported; increase line spacing or split the area.');
       const normalize = x => ((x % spacing) + spacing) % spacing;
@@ -1588,7 +1586,7 @@
       const passes = new Set(lines.map(line => line.passNumber)).size;
       const totalMeters = lines.reduce((sum, line) => sum + line.lengthMeters, 0);
       record.details.querySelector('.planned-summary').textContent =
-        `${record.optimization ? 'Bathtub Optimized · ' : ''}${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
+        `${record.optimization ? 'BathTub Optimized · ' : ''}${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
       record.element.querySelector('.planned-name').title = `${record.name} (${record.sourceName})`;
       if (!planStatsModal.hidden && activePlanStatsId === record.id) refreshPlanStatsPopup();
     }
@@ -1646,7 +1644,7 @@
     }
 
 
-    // -- Bathtub projected coverage ---------------------------------------
+    // -- BathTub projected coverage ---------------------------------------
     // Predicted swath is calculated from actual bathymetry sampled at the nadir
     // track, not from the single mean-depth entry in the Plan Survey dialog.
     // A locally projected meter CRS is used for true port/starboard distances.
@@ -1729,7 +1727,7 @@
       const ifdStart = imageStart + imageSize + imageSize % 2;
       const tags = [
         [256,4,[width]], [257,4,[height]], [258,3,[8]], [259,3,[1]],
-        [262,3,[3]], [270,2,ascii('Bathtub projected coverage; 1=No coverage (red), 2=One survey pass (yellow), 3=Two or more survey passes (green); 0=NoData.')],
+        [262,3,[3]], [270,2,ascii('BathTub projected coverage; 1=No coverage (red), 2=One survey pass (yellow), 3=Two or more survey passes (green); 0=NoData.')],
         [273,4,[imageStart]], [274,3,[1]], [277,3,[1]],
         [278,4,[height]], [279,4,[imageSize]], [284,3,[1]],
         [320,3,palette],
@@ -2066,7 +2064,7 @@
         let result;
         if (currentSurveyPlacement() === 'optimized') {
           if (!(speedKnots > 0) || !(turnMinutes >= 0)) {
-            throw new Error('Bathtub Optimized Survey requires both Survey Speed (knots) and Turn time (minutes) to minimize calculated survey time.');
+            throw new Error('BathTub Optimized Survey requires both Survey Speed (knots) and Turn time (minutes) to minimize calculated survey time.');
           }
           // In manual spacing mode, the effective swath is unknown, so assume
           // it equals spacing for the simplified coverage test. This does not
@@ -2196,7 +2194,7 @@
     }
     function openExportModal() {
       refreshExportPlanOptions();
-      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'Bathtub Map' : selectedExportPlan()?.name || 'Line Plan');
+      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'BathTub Map' : selectedExportPlan()?.name || 'Line Plan');
       showExportMessage('');
       exportModal.hidden = false;
       document.body.style.overflow = 'hidden';
@@ -2232,7 +2230,7 @@
       refreshExportAvailability();
     });
     exportFormatSelect.addEventListener('change', () => {
-      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'Bathtub Map' : selectedExportPlan()?.name || 'Line Plan');
+      exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'BathTub Map' : selectedExportPlan()?.name || 'Line Plan');
       refreshExportAvailability();
       showExportMessage('');
     });
@@ -2247,7 +2245,7 @@
         pdf.setFillColor(9, 45, 66);
         pdf.rect(0, 0, 210, 36, 'F');
         pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(19); pdf.text('Bathtub | Survey Plan Summary', 16, 21);
+        pdf.setFontSize(19); pdf.text('BathTub | Survey Plan Summary', 16, 21);
         pdf.setTextColor(30, 62, 81); pdf.setFontSize(12);
         pdf.text(pdf.splitTextToSize(plan.name, 177), 16, 47);
         const rows = getPlanSummaryRows(plan);
@@ -2272,7 +2270,7 @@
         pdf.setTextColor(95, 117, 132);
         pdf.text(pdf.splitTextToSize(planStatsNote, 175), 16, y + 7);
         pdf.setFontSize(8.5);
-        pdf.text('Created by Declan Tracy  |  Bathtub', 16, 286);
+        pdf.text('Created by Declan Tracy  |  BathTub', 16, 286);
         pdf.save(`${exportStem(plan.name)}-summary.pdf`);
         showExportMessage(`Downloaded ${exportStem(plan.name)}-summary.pdf.`);
       } catch (error) {
@@ -2313,7 +2311,7 @@
         '    </trkseg>', '  </trk>'
       ].join('\n')).join('\n');
       return ['<?xml version="1.0" encoding="UTF-8"?>',
-        '<gpx version="1.1" creator="Bathtub" xmlns="http://www.topografix.com/GPX/1/1">',
+        '<gpx version="1.1" creator="BathTub" xmlns="http://www.topografix.com/GPX/1/1">',
         '  <metadata>', `    <name>${xmlText(plan.name)}</name>`, '  </metadata>',
         tracks, '</gpx>'].join('\n');
     }
@@ -2525,7 +2523,7 @@
       const scaleX = (projectedLowerRight.x - projectedTopLeft.x) / canvas.width;
       const scaleY = (projectedTopLeft.y - projectedLowerRight.y) / canvas.height;
       const tiff = writeGeoTIFF(canvas, projectedTopLeft.x, projectedTopLeft.y, scaleX, scaleY);
-      return { filename: `${exportStem(exportFileName.value || 'Bathtub Map')}.tif`,
+      return { filename: `${exportStem(exportFileName.value || 'BathTub Map')}.tif`,
         blob: new Blob([tiff], {type:'image/tiff'}), mime:'image/tiff', format:'tif', count:0 };
     }
     async function currentExportFile() {
@@ -2550,7 +2548,7 @@
       saveSurveyFileBtn.disabled = true;
       const format = exportFormatSelect.value;
       const mapMode = format === 'tif';
-      const stem = exportStem(exportFileName.value || (mapMode ? 'Bathtub Map' : selectedExportPlan()?.name));
+      const stem = exportStem(exportFileName.value || (mapMode ? 'BathTub Map' : selectedExportPlan()?.name));
       const mime = mapMode ? 'image/tiff' : format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
       try {
         if (typeof window.showSaveFilePicker !== 'function') {
