@@ -300,11 +300,19 @@
     .survey-accordion-extra .optimization-settings { margin: 0; }
     .survey-accordion-extra .coverage-settings { margin: 12px 0 0; }
     .survey-accordion-empty { padding: 12px 14px; font-size: 12px; color: #698494; }
-    #surveyTimeSection .survey-input-row { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+    /* Two distinct day/hour fields, with room beneath for the live estimate. */
+    #surveyTimeSection .survey-time-input-row { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr); gap: 10px; align-items: end; }
+    .survey-time-values { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 8px; min-width: 0; }
+    .survey-time-values > div { min-width: 0; }
+    #surveyTimeSection .survey-time-values label { font-size: 12px; font-weight: 650; margin: 0 0 6px; color: #476a7d; }
+    .survey-time-values input { width: 100%; padding: 11px 7px; }
     .survey-time-detail { display: grid; gap: 14px; }
-    .survey-time-status { margin: -5px 0 0; line-height: 1.4; color: #617d8d; font-size: 11px; }
+    .survey-time-status { display: block; margin: 12px 0 0; line-height: 1.5; color: #617d8d; font-size: 11px; }
     .survey-time-status.is-error { color: #aa543f; }
-    .survey-time-unit input { padding-right: 55px; }
+    @media (max-width: 460px) {
+      #surveyTimeSection .survey-time-input-row { grid-template-columns: 1fr; }
+      .survey-time-values { grid-template-columns: 1fr 1fr; }
+    }
     .survey-modal-backdrop[hidden] { display: none; }
   </style>
 </head>
@@ -320,7 +328,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.26</span>
+      <span>Version 1.6.27</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -451,13 +459,6 @@
                 </div>
               </div>
               <div id="swathCalculationInputs" class="swath-calculation-inputs" hidden>
-                <div>
-                  <label for="swathDepthValue">Water depth (m)</label>
-                  <div class="depth-input-row">
-                    <input id="swathDepthValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 30" aria-label="Water depth in metres">
-                    <button id="calculateDepthBtn" class="depth-calculator-button" type="button" title="Calculate mean depth from bathymetry" aria-label="Calculate mean depth from bathymetry" aria-haspopup="dialog" aria-controls="depthModal">▦</button>
-                  </div>
-                </div>
                 <div class="survey-input-row">
                   <div>
                     <label for="portBeamAngleValue">Port angle (°)</label>
@@ -466,6 +467,13 @@
                   <div>
                     <label for="starboardBeamAngleValue">Starboard angle (°)</label>
                     <input id="starboardBeamAngleValue" class="survey-parameter-input" type="number" min="0" max="89.9" step="any" inputmode="decimal" placeholder="From vertical" aria-label="Starboard beam angle from vertical in degrees">
+                  </div>
+                </div>
+                <div>
+                  <label for="swathDepthValue">Water depth (m)</label>
+                  <div class="depth-input-row">
+                    <input id="swathDepthValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 30" aria-label="Water depth in metres">
+                    <button id="calculateDepthBtn" class="depth-calculator-button" type="button" title="Calculate mean depth from bathymetry" aria-label="Calculate mean depth from bathymetry" aria-haspopup="dialog" aria-controls="depthModal">▦</button>
                   </div>
                 </div>
                 <p class="survey-hint">Approximate flat-bottom swath: depth × (tan(port angle) + tan(starboard angle)). Angles are measured outward from vertical.</p>
@@ -493,15 +501,21 @@
           <summary>Survey Time</summary>
           <div class="survey-accordion-body">
             <div class="survey-field">
-              <label for="surveyTimeMode">Estimated survey time (hours)</label>
-              <div class="survey-input-row">
+              <label for="surveyTimeMode">Estimated survey time</label>
+              <div class="survey-time-input-row">
                 <select id="surveyTimeMode" class="survey-parameter-select" aria-label="Survey time method">
                   <option value="calculated" selected>Calculate from speed + turns</option>
                   <option value="manual">Manual</option>
                 </select>
-                <div class="survey-input-unit survey-time-unit">
-                  <input id="surveyTimeValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="Calculated hours" aria-label="Estimated survey time in hours" readonly>
-                  <span aria-hidden="true">hours</span>
+                <div class="survey-time-values" role="group" aria-label="Estimated duration in days and hours">
+                  <div>
+                    <label for="surveyTimeDays">Days</label>
+                    <input id="surveyTimeDays" class="survey-parameter-input" type="number" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="Estimated survey days" readonly>
+                  </div>
+                  <div>
+                    <label for="surveyTimeHours">Hours</label>
+                    <input id="surveyTimeHours" class="survey-parameter-input" type="number" min="0" max="23.999999" step="any" inputmode="decimal" placeholder="0.000" aria-label="Estimated remaining survey hours (decimals allowed)" readonly>
+                  </div>
                 </div>
               </div>
               <p id="surveyTimeStatus" class="survey-time-status" role="status" aria-live="polite">Select a polygon, line spacing, orientation, survey speed and turn time to calculate.</p>
@@ -879,9 +893,11 @@
     const surveySpeedValueEl = document.getElementById('surveySpeedValue');
     const turnTimeValueEl = document.getElementById('turnTimeValue');
     const surveyTimeModeEl = document.getElementById('surveyTimeMode');
-    const surveyTimeValueEl = document.getElementById('surveyTimeValue');
+    const surveyTimeDaysEl = document.getElementById('surveyTimeDays');
+    const surveyTimeHoursEl = document.getElementById('surveyTimeHours');
     const surveyTimeDetailEl = document.getElementById('surveyTimeDetail');
     const surveyTimeStatusEl = document.getElementById('surveyTimeStatus');
+    let manualSurveyDaysText = '';
     let manualSurveyHoursText = '';
     let displayedEstimatedMinutes = NaN;
     let surveyTimeRefreshToken = 0;
@@ -889,29 +905,54 @@
       surveyTimeStatusEl.textContent = message;
       surveyTimeStatusEl.classList.toggle('is-error', isError);
     }
+    function manualSurveyMinutes() {
+      const dayText = surveyTimeDaysEl.value.trim(), hourText = surveyTimeHoursEl.value.trim();
+      if (dayText === '' && hourText === '') return NaN;
+      const days = dayText === '' ? 0 : Number(dayText);
+      const hours = hourText === '' ? 0 : Number(hourText);
+      if (!Number.isSafeInteger(days) || days < 0 || !Number.isFinite(hours) || hours < 0 || hours >= 24)
+        return NaN;
+      const minutes = (days * 24 + hours) * 60;
+      return Number.isFinite(minutes) ? minutes : NaN;
+    }
+    function displayCalculatedSurveyMinutes(minutes) {
+      // Round before splitting, so the hours component never displays as 24.000.
+      const totalHours = Math.round(minutes / 60 * 1000) / 1000;
+      const days = Math.floor(totalHours / 24);
+      const remainder = Number((totalHours - days * 24).toFixed(3));
+      surveyTimeDaysEl.value = String(days);
+      surveyTimeHoursEl.value = String(remainder);
+    }
     function updateSurveyTimeMode() {
       const manual = surveyTimeModeEl.value === 'manual';
-      surveyTimeValueEl.readOnly = !manual;
-      surveyTimeValueEl.placeholder = manual ? 'Enter hours' : 'Calculated hours';
+      ++surveyTimeRefreshToken;
+      clearTimeout(surveyEstimateTimer);
+      surveyTimeDaysEl.readOnly = !manual;
+      surveyTimeHoursEl.readOnly = !manual;
       surveyTimeDetailEl.hidden = manual;
       if (manual) {
-        surveyTimeValueEl.value = manualSurveyHoursText;
-        setSurveyTimeStatus('Enter the total estimated survey duration in hours (e.g. 2.5 for 2 h 30 min).');
+        surveyTimeDaysEl.value = manualSurveyDaysText;
+        surveyTimeHoursEl.value = manualSurveyHoursText;
+        updateManualSurveyTimeStatus();
       } else {
         scheduleSurveyTimeEstimate();
       }
     }
+    function updateManualSurveyTimeStatus() {
+      manualSurveyDaysText = surveyTimeDaysEl.value;
+      manualSurveyHoursText = surveyTimeHoursEl.value;
+      const minutes = manualSurveyMinutes();
+      const provided = manualSurveyDaysText.trim() !== '' || manualSurveyHoursText.trim() !== '';
+      setSurveyTimeStatus(Number.isFinite(minutes)
+        ? `Manual estimate: ${formatSurveyMinutes(minutes)}.`
+        : provided ? 'Enter whole days ≥ 0 and remaining hours from 0 to less than 24 (decimals allowed).'
+        : 'Enter a duration in days and decimal hours (e.g. 2 days, 3.5 hours).',
+        provided && !Number.isFinite(minutes));
+    }
     surveyTimeModeEl.addEventListener('change', updateSurveyTimeMode);
-    surveyTimeValueEl.addEventListener('input', () => {
-      if (surveyTimeModeEl.value === 'manual') {
-        manualSurveyHoursText = surveyTimeValueEl.value;
-        const hours = readOptionalNumber(surveyTimeValueEl);
-        setSurveyTimeStatus(Number.isFinite(hours) && hours >= 0
-          ? `Manual estimate: ${formatSurveyMinutes(hours * 60)}.`
-          : 'Enter a non-negative number of hours.',
-          surveyTimeValueEl.value.trim() !== '' && !(Number.isFinite(hours) && hours >= 0));
-      }
-    });
+    [surveyTimeDaysEl, surveyTimeHoursEl].forEach(el => el.addEventListener('input', () => {
+      if (surveyTimeModeEl.value === 'manual') updateManualSurveyTimeStatus();
+    }));
 
     const surveyPlacementRadios = Array.from(document.querySelectorAll('input[name="surveyPlacement"]'));
     const optimizationCautionEl = document.getElementById('optimizationCaution');
@@ -1686,7 +1727,8 @@
       clearTimeout(surveyEstimateTimer);
       if (surveyTimeModeEl.value === 'manual') return;
       displayedEstimatedMinutes = NaN;
-      surveyTimeValueEl.value = '';
+      surveyTimeDaysEl.value = '';
+      surveyTimeHoursEl.value = '';
       const selected = selectedSurveyAreaRecord();
       const spacing = lineSpacingModeEl.value === 'swath' ? calculatedSpacingMetres : readOptionalNumber(lineSpacingValueEl);
       const bearing = readOptionalNumber(document.getElementById('lineOrientationValue'));
@@ -1713,12 +1755,13 @@
           }
           if (token !== surveyTimeRefreshToken) return;
           displayedEstimatedMinutes = estimate.minutes;
-          surveyTimeValueEl.value = String(Number((estimate.minutes / 60).toFixed(3)));
+          displayCalculatedSurveyMinutes(estimate.minutes);
           setSurveyTimeStatus(`${formatSurveyMinutes(estimate.minutes)} · ${estimate.segmentCount} lines · ${(estimate.totalMeters/1000).toFixed(2)} km · ${estimate.turns} turns. Excludes transit.`);
         } catch (error) {
           if (token !== surveyTimeRefreshToken) return;
           displayedEstimatedMinutes = NaN;
-          surveyTimeValueEl.value = '';
+          surveyTimeDaysEl.value = '';
+          surveyTimeHoursEl.value = '';
           setSurveyTimeStatus(error.message || 'Unable to estimate survey time.', true);
         }
       }, 300);
@@ -2202,9 +2245,9 @@
           : 'Enter a line spacing greater than zero, in metres.');
         if (!Number.isFinite(bearing) || bearing < 0 || bearing >= 360) throw new Error('Enter a line orientation from 0° to less than 360° (clockwise from North).');
         const manualTiming = surveyTimeModeEl.value === 'manual';
-        const manualHours = readOptionalNumber(surveyTimeValueEl);
-        if (manualTiming && !(Number.isFinite(manualHours) && manualHours >= 0)) {
-          throw new Error('Enter a non-negative manual survey time in hours.');
+        const manualMinutes = manualTiming ? manualSurveyMinutes() : NaN;
+        if (manualTiming && !(Number.isFinite(manualMinutes) && manualMinutes >= 0)) {
+          throw new Error('Enter a manual survey time using whole days and remaining hours from 0 to less than 24.');
         }
         // Calculated timing is optional for drawing, but when supplied needs
         // both vessel-speed and turn-time inputs.
@@ -2256,7 +2299,7 @@
             readOptionalNumber(portBeamAngleValueEl),readOptionalNumber(starboardBeamAngleValueEl),planName);
         }
         registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes, optimization, coverage,
-          manualTiming ? manualHours * 60 : NaN);
+          manualTiming ? manualMinutes : NaN);
         closeSurveyModal();
         if (coverage) {
           downloadExportFile({filename:coverage.filename,blob:coverage.blob});
