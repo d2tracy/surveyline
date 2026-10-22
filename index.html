@@ -95,6 +95,15 @@
     .orientation-status { color: #476b7c; font-size: 12px; line-height: 1.5; margin: 12px 0 0; }
     .orientation-status.error { color: #ab372c; }
     .orientation-source { overflow-wrap: anywhere; }
+    .orientation-summary { border: 1px solid #cfdee7; padding: 12px 13px; margin-top: 13px; background: #f2f7f9; }
+    .orientation-summary[hidden], .orientation-suggestion[hidden] { display: none !important; }
+    .orientation-stat-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 13px; }
+    .orientation-stat-row span { color: #547386; }
+    .orientation-stat-row strong { font-weight: 750; color: #17334b; text-align: right; }
+    .orientation-summary-hint { margin-top: 6px; font-size: 11px; line-height: 1.45; color: #617e8c; }
+    .orientation-suggestion { display: block; width: 100%; border: 1px solid #267eaa; padding: 12px 13px; margin-top: 11px; color: white; background: #2777a6; cursor: pointer; font-weight: 700; text-align: center; font-size: 13px; }
+    .orientation-suggestion:hover { background: #17628e; }
+    .orientation-suggestion:disabled { opacity: .55; cursor: not-allowed; }
     .depth-apply { margin-top: 10px; }
     .depth-apply[hidden] { display: none; }
     .survey-name-field { margin-top: 18px; }
@@ -335,7 +344,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.28</span>
+      <span>Version 1.6.29</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -604,9 +613,15 @@
       </div>
       <p id="orientationDescription" class="depth-description">The selected survey area is analysed as a 3 × 3 grid. Each arrow shows the mean downhill slope direction estimated from bathymetry pixels in that zone; grid boundaries are hidden.</p>
       <div id="orientationSource" class="depth-source" role="status"></div>
-      <div id="orientationPreview" class="orientation-preview" role="img" aria-label="Survey polygon with nine regional downhill slope arrows"></div>
+      <div id="orientationPreview" class="orientation-preview" role="img" aria-label="Survey polygon with downhill slope arrows in zones containing valid bathymetry"></div>
       <p id="orientationStatus" class="orientation-status" role="status" aria-live="polite"></p>
-      <p class="depth-warning">The arrows indicate downhill aspect, not the proposed survey-line direction. For contour-parallel lines, orientation is roughly 90° from the arrows. Assumes negative raster values are elevations below datum and positive values represent depth (positive down). NoData and flat cells are excluded.</p>
+      <div id="orientationSummary" class="orientation-summary" hidden>
+        <div class="orientation-stat-row"><span>Mean downhill direction</span><strong id="orientationMeanDirection">—</strong></div>
+        <div class="orientation-stat-row"><span>Mean slope</span><strong id="orientationMeanSlope">—</strong></div>
+        <p class="orientation-summary-hint">Each displayed arrow has equal weight. Directions use a circular mean; slope is the average of each displayed zone’s mean slope angle.</p>
+      </div>
+      <button id="applySuggestedOrientation" class="orientation-suggestion" type="button" hidden>Use suggested line orientation</button>
+      <p class="depth-warning">Shown arrows are placed inside the survey polygon; zones without a reliable downhill direction are omitted. The suggested contour-parallel orientation is mean downhill direction + 90° (wrapped to 0–360°). Slope is calculated from raster gradients using map distances; assume negative values are elevations and positive values are depths. NoData and flat cells are excluded.</p>
     </section>
   </div>
 
@@ -842,7 +857,12 @@
     const orientationSourceEl = document.getElementById('orientationSource');
     const orientationPreviewEl = document.getElementById('orientationPreview');
     const orientationStatusEl = document.getElementById('orientationStatus');
+    const orientationSummaryEl = document.getElementById('orientationSummary');
+    const orientationMeanDirectionEl = document.getElementById('orientationMeanDirection');
+    const orientationMeanSlopeEl = document.getElementById('orientationMeanSlope');
+    const applySuggestedOrientationBtn = document.getElementById('applySuggestedOrientation');
     let orientationFinderToken = 0;
+    let pendingSuggestedOrientation = null;
     const calculateDepthBtn = document.getElementById('calculateDepthBtn');
     const closeDepthModalBtn = document.getElementById('closeDepthModal');
     const depthSourceEl = document.getElementById('depthSource');
@@ -1328,7 +1348,8 @@
       const stride = Math.max(1, Math.ceil(Math.sqrt(numberOfCells / 150000)));
       const nodata = georaster.noDataValue === undefined || georaster.noDataValue === null || georaster.noDataValue === ''
         ? null : Number(georaster.noDataValue);
-      const zones = Array.from({length:9},(_,i)=>({index:i, east:0, north:0, count:0, px:0, py:0, direction:null, strength:0}));
+      const zones = Array.from({length:9},(_,i)=>({index:i, east:0, north:0, count:0, px:0, py:0,
+        direction:null, strength:0, slopeSum:0, meanSlopeDegrees:null, samples:[]}));
       const toGeographic = (col,row) => {
         const nativePoint = [native.xmin + (col + 0.5)*native.pixelWidth,
           native.ymax - (row + 0.5)*native.pixelHeight];
@@ -1367,16 +1388,35 @@
           zone.east += east/magnitude;
           zone.north += north/magnitude;
           zone.px += xy[0]; zone.py += xy[1];
+          zone.slopeSum += Math.atan(magnitude)*180/Math.PI;
           zone.count++;
+          // Save a sparse set of guaranteed interior pixel centres. The
+          // centroid of a crescent-shaped region can lie outside its polygon.
+          if (zone.count % 12 === 1) zone.samples.push(xy);
         }
         if ((row-minRow) % (25*stride) === 0) await new Promise(resolve=>setTimeout(resolve,0));
       }
       for (const zone of zones) {
         if (!zone.count) continue;
         zone.px /= zone.count; zone.py /= zone.count;
+        zone.meanSlopeDegrees=zone.slopeSum/zone.count;
         zone.strength=Math.hypot(zone.east,zone.north)/zone.count;
         if (zone.strength > 0.05)
           zone.direction=(Math.atan2(zone.east,zone.north)*180/Math.PI+360)%360;
+        // A centroid may lie beyond a concave outline or within a hole.
+        // Relocate such an arrow to an actual sampled interior raster pixel.
+        if (zone.direction!==null && !pixelInSurvey(zone.px,zone.py,projected)) {
+          let closest=null, nearest=Infinity;
+          for (const xy of zone.samples) {
+            const dist=(xy[0]-zone.px)**2+(xy[1]-zone.py)**2;
+            if (dist<nearest && pixelInSurvey(xy[0],xy[1],projected)) {
+              closest=xy; nearest=dist;
+            }
+          }
+          if (closest) {zone.px=closest[0];zone.py=closest[1];}
+          else zone.direction=null;
+        }
+        zone.samples=[];
       }
       return {projected,zones,x0,y0,x1,y1,stride};
     }
@@ -1392,13 +1432,9 @@
         const parts=polygon.map(ring=>ring.map((point,i)=>(i?'L':'M')+p(point)).join(' ')+' Z');
         return `<path d="${parts.join(' ')}" fill="#e7f1f5" fill-rule="evenodd" stroke="#2d758f" stroke-width="1.8"/>`;
       }).join('');
-      const arrows=zones.map(zone=>{
-        const label=zone.index+1;
-        const cx=sx(zone.count?zone.px:x0+(zone.index%3+.5)*(x1-x0)/3);
-        const cy=sy(zone.count?zone.py:y1-(Math.floor(zone.index/3)+.5)*(y1-y0)/3);
-        if (!zone.count || zone.direction===null) {
-          return `<g><circle cx="${cx}" cy="${cy}" r="13" fill="white" stroke="#b5c8d1" stroke-width="1"/><text x="${cx}" y="${cy+4}" font-size="13" text-anchor="middle" fill="#718b98">–</text></g>`;
-        }
+      const arrows=zones.filter(zone=>zone.direction!==null &&
+        pixelInSurvey(zone.px,zone.py,projected)).map(zone=>{
+        const cx=sx(zone.px), cy=sy(zone.py);
         const theta=zone.direction*Math.PI/180;
         const east=Math.sin(theta), north=Math.cos(theta);
         const half=13;
@@ -1409,9 +1445,26 @@
       orientationPreviewEl.innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Survey-area polygon and nine regional mean downhill slope directions"><defs><marker id="orientationArrowHead" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#c6732e"/></marker></defs>${outlines}${arrows}<text x="${w-13}" y="17" font-size="11" text-anchor="end" fill="#547386">N ↑</text></svg>`;
     }
 
+    // Circular rather than arithmetic bearings: 359° and 1° average to 0°.
+    // Each visible regional arrow contributes equally to the summary.
+    function summarizeOrientationArrows(analysis) {
+      const shown=analysis.zones.filter(z=>z.direction!==null &&
+        pixelInSurvey(z.px,z.py,analysis.projected));
+      if (!shown.length) return {count:0, direction:null, slope:null, suggested:null};
+      const east=shown.reduce((sum,z)=>sum+Math.sin(z.direction*Math.PI/180),0);
+      const north=shown.reduce((sum,z)=>sum+Math.cos(z.direction*Math.PI/180),0);
+      // Opposing directions can cancel; do not report a misleading bearing.
+      const direction=Math.hypot(east,north)/shown.length>0.05
+        ? (Math.atan2(east,north)*180/Math.PI+360)%360 : null;
+      const slope=shown.reduce((sum,z)=>sum+z.meanSlopeDegrees,0)/shown.length;
+      const suggested=direction===null?null:(direction+90)%360;
+      return {count:shown.length,direction,slope,suggested};
+    }
+
     function closeOrientationFinder(restoreFocus=true) {
       orientationFinderToken++;
       orientationModal.hidden=true;
+      pendingSuggestedOrientation=null;
       if (restoreFocus && !surveyModal.hidden) orientationFinderBtn.focus();
     }
     orientationFinderBtn.addEventListener('click', async () => {
@@ -1419,6 +1472,9 @@
       const area=selectedSurveyAreaRecord();
       const raster=activeBathymetryLayer();
       orientationPreviewEl.replaceChildren();
+      orientationSummaryEl.hidden=true;
+      applySuggestedOrientationBtn.hidden=true;
+      pendingSuggestedOrientation=null;
       orientationStatusEl.classList.remove('error');
       orientationModal.hidden=false;
       closeOrientationFinderBtn.focus();
@@ -1441,14 +1497,35 @@
         if (surveyAreaSelect.value!==selectedId || activeBathymetryLayer()?.id!==rasterId)
           throw new Error('The selected survey area or bathymetry changed during calculation. Open the tool again.');
         renderOrientationPreview(analysis);
-        const valid=analysis.zones.filter(z=>z.direction!==null).length;
+        const summary=summarizeOrientationArrows(analysis);
         const mixed=analysis.zones.filter(z=>z.count>0 && z.direction===null).length;
-        orientationStatusEl.textContent=`${valid} of 9 zones have a mean downhill direction. ${mixed?`${mixed} zone(s) have mixed or cancelling slope directions. `:''}A dash indicates insufficient or inconsistent slope data. Arrows are sampled from bathymetry inside the survey area (stride: ${analysis.stride} pixel${analysis.stride===1?'':'s'}).`;
+        orientationStatusEl.textContent=`${summary.count} of 9 zones display a downhill arrow. Zones outside the survey polygon or without reliable slope data are omitted.${mixed?` ${mixed} zone(s) had inconsistent slope directions.`:''} Raster sampling stride: ${analysis.stride} pixel${analysis.stride===1?'':'s'}.`;
+        if(summary.count){
+          orientationSummaryEl.hidden=false;
+          orientationMeanDirectionEl.textContent=summary.direction===null
+            ? 'Inconsistent directions' : `${summary.direction.toFixed(1)}°`;
+          orientationMeanSlopeEl.textContent=`${summary.slope.toFixed(2)}° (${(Math.tan(summary.slope*Math.PI/180)*100).toFixed(2)}% gradient)`;
+          if(summary.suggested!==null){
+            pendingSuggestedOrientation=summary.suggested;
+            applySuggestedOrientationBtn.hidden=false;
+            applySuggestedOrientationBtn.textContent=`Use suggested line orientation: ${summary.suggested.toFixed(1)}°`;
+          }
+        }
       } catch(error) {
         if(request!==orientationFinderToken) return;
         orientationStatusEl.textContent=error.message||'Slope direction calculation failed.';
         orientationStatusEl.classList.add('error');
       }
+    });
+    applySuggestedOrientationBtn.addEventListener('click',()=>{
+      if (pendingSuggestedOrientation===null) return;
+      const value=Number(pendingSuggestedOrientation.toFixed(3))%360;
+      const input=document.getElementById('lineOrientationValue');
+      input.value=String(value);
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      closeOrientationFinder(false);
+      input.focus();
     });
     closeOrientationFinderBtn.addEventListener('click',()=>closeOrientationFinder());
     orientationModal.addEventListener('click',event=>{
@@ -1456,7 +1533,12 @@
     });
     orientationModal.addEventListener('keydown',event=>{
       if(event.key==='Escape') {event.preventDefault();event.stopPropagation();closeOrientationFinder();}
-      else if(event.key==='Tab') {event.preventDefault();closeOrientationFinderBtn.focus();}
+      else if(event.key==='Tab') {
+        const available=[closeOrientationFinderBtn,applySuggestedOrientationBtn].filter(el=>!el.hidden&&!el.disabled);
+        const first=available[0],last=available[available.length-1];
+        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+      }
     });
 
     calculateDepthFromRasterBtn.addEventListener('click', async () => {
