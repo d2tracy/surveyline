@@ -88,6 +88,13 @@
     .depth-calculate.is-complete { background: #fff; color: #a65319; border: 2px solid #ee9854; }
     .depth-calculate.is-complete:hover:not(:disabled) { background: #fff8f1; }
     .depth-warning { margin: 12px 0 0; color: #657d8d; line-height: 1.5; font-size: 11px; }
+    .orientation-dialog { width: min(495px, 100%); }
+    .orientation-preview { border: 1px solid #cbdfe8; background: #f7fbfc; padding: 8px; min-height: 250px; }
+    .orientation-preview svg { display: block; width: 100%; height: auto; max-height: 390px; }
+    .orientation-preview:empty { display: none; }
+    .orientation-status { color: #476b7c; font-size: 12px; line-height: 1.5; margin: 12px 0 0; }
+    .orientation-status.error { color: #ab372c; }
+    .orientation-source { overflow-wrap: anywhere; }
     .depth-apply { margin-top: 10px; }
     .depth-apply[hidden] { display: none; }
     .survey-name-field { margin-top: 18px; }
@@ -328,7 +335,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.6.27</span>
+      <span>Version 1.6.28</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -493,7 +500,10 @@
           <div class="survey-accordion-body">
             <div class="survey-field">
               <label for="lineOrientationValue">Orientation (° clockwise from true north)</label>
-              <input id="lineOrientationValue" class="survey-parameter-input" type="number" min="0" max="359.999" step="any" inputmode="decimal" placeholder="Enter angle (°)" aria-label="Line orientation in degrees">
+              <div class="depth-input-row">
+                <input id="lineOrientationValue" class="survey-parameter-input" type="number" min="0" max="359.999" step="any" inputmode="decimal" placeholder="Enter angle (°)" aria-label="Line orientation in degrees">
+                <button id="orientationFinderBtn" class="depth-calculator-button" type="button" title="Open Orientation Finder" aria-label="Calculate slope directions with Orientation Finder" aria-haspopup="dialog" aria-controls="orientationModal">▦</button>
+              </div>
             </div>
           </div>
         </details>
@@ -582,6 +592,21 @@
       <p id="depthResult" class="depth-result" role="status" aria-live="polite" hidden></p>
       <button id="applyCalculatedDepth" class="survey-draw depth-apply" type="button" hidden>Input water depth</button>
       <p class="depth-warning">This is a pixel-centre mean, not an area-weighted or vertical-datum-corrected sounding.</p>
+    </section>
+  </div>
+
+  <!-- Slope-direction preview in nine fixed zones, calculated entirely in-browser. -->
+  <div class="survey-modal-backdrop depth-backdrop" id="orientationModal" hidden>
+    <section class="survey-dialog orientation-dialog" role="dialog" aria-modal="true" aria-labelledby="orientationDialogTitle" aria-describedby="orientationDescription">
+      <div class="survey-dialog-head">
+        <h2 id="orientationDialogTitle">Orientation Finder</h2>
+        <button id="closeOrientationFinder" class="survey-close" type="button" aria-label="Close Orientation Finder">×</button>
+      </div>
+      <p id="orientationDescription" class="depth-description">The selected survey area is analysed as a 3 × 3 grid. Each arrow shows the mean downhill slope direction estimated from bathymetry pixels in that zone; grid boundaries are hidden.</p>
+      <div id="orientationSource" class="depth-source" role="status"></div>
+      <div id="orientationPreview" class="orientation-preview" role="img" aria-label="Survey polygon with nine regional downhill slope arrows"></div>
+      <p id="orientationStatus" class="orientation-status" role="status" aria-live="polite"></p>
+      <p class="depth-warning">The arrows indicate downhill aspect, not the proposed survey-line direction. For contour-parallel lines, orientation is roughly 90° from the arrows. Assumes negative raster values are elevations below datum and positive values represent depth (positive down). NoData and flat cells are excluded.</p>
     </section>
   </div>
 
@@ -811,6 +836,13 @@
     const swathOverlapValueEl = document.getElementById('swathOverlapValue');
     const swathCalculationInputsEl = document.getElementById('swathCalculationInputs');
     const depthModal = document.getElementById('depthModal');
+    const orientationModal = document.getElementById('orientationModal');
+    const orientationFinderBtn = document.getElementById('orientationFinderBtn');
+    const closeOrientationFinderBtn = document.getElementById('closeOrientationFinder');
+    const orientationSourceEl = document.getElementById('orientationSource');
+    const orientationPreviewEl = document.getElementById('orientationPreview');
+    const orientationStatusEl = document.getElementById('orientationStatus');
+    let orientationFinderToken = 0;
     const calculateDepthBtn = document.getElementById('calculateDepthBtn');
     const closeDepthModalBtn = document.getElementById('closeDepthModal');
     const depthSourceEl = document.getElementById('depthSource');
@@ -1268,6 +1300,165 @@
       if (!Number.isFinite(mean)) throw new Error('Unable to calculate a valid mean from this TIFF.');
       return { mean, count, invalid: candidates - count };
     }
+    // Each 3x3 zone is defined in the local metric map bounding box, not in
+    // TIFF rows/columns. This gives nine equal geographic-size analysis cells
+    // even if the TIFF resolution or coordinate reference system changes.
+    async function calculateOrientationZones(sourceData, georaster) {
+      if (georaster.numberOfRasters !== 1) throw new Error('Orientation Finder requires a single-band bathymetry TIFF.');
+      const native = coverageRasterTransform(georaster);
+      const bathy = georaster.values?.[0];
+      if (!bathy || bathy.length !== georaster.height || bathy[0]?.length !== georaster.width)
+        throw new Error('Native bathymetry pixels are unavailable. Upload a smaller single-band GeoTIFF.');
+      const local = projectedSurveyPolygons(sourceData);
+      const projected = local.projected;
+      const points = projected.flat(2);
+      const x0 = Math.min(...points.map(p => p[0]));
+      const y0 = Math.min(...points.map(p => p[1]));
+      const x1 = Math.max(...points.map(p => p[0]));
+      const y1 = Math.max(...points.map(p => p[1]));
+      if (!(x1 > x0 && y1 > y0)) throw new Error('The survey polygon must have a non-zero extent.');
+      const polygonPixels = transformSurveyIntoRasterPixels(sourceData, georaster);
+      const rasterPoints = polygonPixels.flat(2);
+      const minCol = Math.max(1, Math.floor(Math.min(...rasterPoints.map(p => p[0]))));
+      const maxCol = Math.min(georaster.width - 2, Math.ceil(Math.max(...rasterPoints.map(p => p[0]))));
+      const minRow = Math.max(1, Math.floor(Math.min(...rasterPoints.map(p => p[1]))));
+      const maxRow = Math.min(georaster.height - 2, Math.ceil(Math.max(...rasterPoints.map(p => p[1]))));
+      if (maxCol < minCol || maxRow < minRow) throw new Error('Survey area has no bathymetry pixels with enough neighbours for slope calculation.');
+      const numberOfCells = (maxCol - minCol + 1) * (maxRow - minRow + 1);
+      const stride = Math.max(1, Math.ceil(Math.sqrt(numberOfCells / 150000)));
+      const nodata = georaster.noDataValue === undefined || georaster.noDataValue === null || georaster.noDataValue === ''
+        ? null : Number(georaster.noDataValue);
+      const zones = Array.from({length:9},(_,i)=>({index:i, east:0, north:0, count:0, px:0, py:0, direction:null, strength:0}));
+      const toGeographic = (col,row) => {
+        const nativePoint = [native.xmin + (col + 0.5)*native.pixelWidth,
+          native.ymax - (row + 0.5)*native.pixelHeight];
+        return native.code === '4326' || native.code === 'CRS:84'
+          ? nativePoint : proj4(`EPSG:${native.code}`, 'EPSG:4326', nativePoint);
+      };
+      // Gradients are calculated in metres, with raster-row Y reversed so
+      // increasing north is consistently +Y even in a north-up TIFF.
+      for (let row=minRow;row<=maxRow;row+=stride) {
+        const a=bathy[row-1], b=bathy[row], c=bathy[row+1];
+        for (let col=minCol;col<=maxCol;col+=stride) {
+          if (!pixelInSurvey(col+0.5,row+0.5,polygonPixels)) continue;
+          const values=[b[col],b[col-1],b[col+1],a[col],c[col]];
+          if (!values.every(v=>isValidPixel(v,nodata))) continue;
+          const geographic=toGeographic(col,row);
+          if (!geographic.every(Number.isFinite)) continue;
+          const xy=local.projection.forward(geographic);
+          if (!xy.every(Number.isFinite)) continue;
+          const zoneCol=Math.min(2,Math.max(0,Math.floor((xy[0]-x0)/(x1-x0)*3)));
+          const zoneRow=Math.min(2,Math.max(0,Math.floor((y1-xy[1])/(y1-y0)*3)));
+          const dx = native.code==='4326'||native.code==='CRS:84'
+            ? native.pixelWidth * 111320 * Math.cos(geographic[1]*Math.PI/180)
+            : native.pixelWidth * (native.code==='3857'?Math.cos(geographic[1]*Math.PI/180):1);
+          const dy = native.code==='4326'||native.code==='CRS:84'
+            ? native.pixelHeight * 111132
+            : native.pixelHeight * (native.code==='3857'?Math.cos(geographic[1]*Math.PI/180):1);
+          if (!(dx>0 && dy>0)) continue;
+          // For positive-down bathymetry, downhill points towards larger depth;
+          // for negative elevation values, downhill points towards lower Z.
+          const polarity = b[col] < 0 ? -1 : 1;
+          const east = polarity * (b[col+1]-b[col-1])/(2*dx);
+          const north = polarity * (a[col]-c[col])/(2*dy);
+          const magnitude = Math.hypot(east,north);
+          if (!(magnitude > 1e-7)) continue;
+          const zone=zones[zoneRow*3+zoneCol];
+          zone.east += east/magnitude;
+          zone.north += north/magnitude;
+          zone.px += xy[0]; zone.py += xy[1];
+          zone.count++;
+        }
+        if ((row-minRow) % (25*stride) === 0) await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      for (const zone of zones) {
+        if (!zone.count) continue;
+        zone.px /= zone.count; zone.py /= zone.count;
+        zone.strength=Math.hypot(zone.east,zone.north)/zone.count;
+        if (zone.strength > 0.05)
+          zone.direction=(Math.atan2(zone.east,zone.north)*180/Math.PI+360)%360;
+      }
+      return {projected,zones,x0,y0,x1,y1,stride};
+    }
+
+    function renderOrientationPreview(analysis) {
+      const {projected,zones,x0,y0,x1,y1}=analysis;
+      const w=420,h=335,margin=30;
+      const scale=Math.min((w-2*margin)/(x1-x0),(h-2*margin)/(y1-y0));
+      const dx=(w-(x1-x0)*scale)/2, dy=(h-(y1-y0)*scale)/2;
+      const sx=x=>dx+(x-x0)*scale, sy=y=>dy+(y1-y)*scale;
+      const p=point=>`${sx(point[0]).toFixed(3)} ${sy(point[1]).toFixed(3)}`;
+      const outlines=projected.map(polygon=>{
+        const parts=polygon.map(ring=>ring.map((point,i)=>(i?'L':'M')+p(point)).join(' ')+' Z');
+        return `<path d="${parts.join(' ')}" fill="#e7f1f5" fill-rule="evenodd" stroke="#2d758f" stroke-width="1.8"/>`;
+      }).join('');
+      const arrows=zones.map(zone=>{
+        const label=zone.index+1;
+        const cx=sx(zone.count?zone.px:x0+(zone.index%3+.5)*(x1-x0)/3);
+        const cy=sy(zone.count?zone.py:y1-(Math.floor(zone.index/3)+.5)*(y1-y0)/3);
+        if (!zone.count || zone.direction===null) {
+          return `<g><circle cx="${cx}" cy="${cy}" r="13" fill="white" stroke="#b5c8d1" stroke-width="1"/><text x="${cx}" y="${cy+4}" font-size="13" text-anchor="middle" fill="#718b98">–</text></g>`;
+        }
+        const theta=zone.direction*Math.PI/180;
+        const east=Math.sin(theta), north=Math.cos(theta);
+        const half=13;
+        const xStart=cx-half*east,yStart=cy+half*north;
+        const xEnd=cx+half*east,yEnd=cy-half*north;
+        return `<g><circle cx="${cx}" cy="${cy}" r="20" fill="white" fill-opacity=".9"/><line x1="${xStart}" y1="${yStart}" x2="${xEnd}" y2="${yEnd}" stroke="#c6732e" stroke-width="3.2" stroke-linecap="round" marker-end="url(#orientationArrowHead)"/><text x="${cx}" y="${cy+33}" text-anchor="middle" font-size="11" font-weight="700" fill="#315a6e">${Math.round(zone.direction)}°</text></g>`;
+      }).join('');
+      orientationPreviewEl.innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Survey-area polygon and nine regional mean downhill slope directions"><defs><marker id="orientationArrowHead" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#c6732e"/></marker></defs>${outlines}${arrows}<text x="${w-13}" y="17" font-size="11" text-anchor="end" fill="#547386">N ↑</text></svg>`;
+    }
+
+    function closeOrientationFinder(restoreFocus=true) {
+      orientationFinderToken++;
+      orientationModal.hidden=true;
+      if (restoreFocus && !surveyModal.hidden) orientationFinderBtn.focus();
+    }
+    orientationFinderBtn.addEventListener('click', async () => {
+      const request=++orientationFinderToken;
+      const area=selectedSurveyAreaRecord();
+      const raster=activeBathymetryLayer();
+      orientationPreviewEl.replaceChildren();
+      orientationStatusEl.classList.remove('error');
+      orientationModal.hidden=false;
+      closeOrientationFinderBtn.focus();
+      orientationSourceEl.textContent=`Survey area: ${validSurveyArea(area)?area.name:'not selected'} · Bathymetry: ${raster?.rec.name||'not selected'}`;
+      if (!validSurveyArea(area) || !raster) {
+        orientationStatusEl.textContent='Select a polygon as your Survey Area and mark a single-band TIFF as Bathymetry under Imported Layers, then try again.';
+        return;
+      }
+      if (raster.rec.rasterConfig.georaster.numberOfRasters!==1) {
+        orientationStatusEl.textContent='The selected bathymetry TIFF must have a single numeric band.';
+        orientationStatusEl.classList.add('error');
+        return;
+      }
+      const selectedId=surveyAreaSelect.value, rasterId=raster.id;
+      orientationStatusEl.textContent='Calculating nine regional downhill directions from raster samples…';
+      await new Promise(resolve=>setTimeout(resolve,0));
+      try {
+        const analysis=await calculateOrientationZones(area.sourceData,raster.rec.rasterConfig.georaster);
+        if (request!==orientationFinderToken || orientationModal.hidden) return;
+        if (surveyAreaSelect.value!==selectedId || activeBathymetryLayer()?.id!==rasterId)
+          throw new Error('The selected survey area or bathymetry changed during calculation. Open the tool again.');
+        renderOrientationPreview(analysis);
+        const valid=analysis.zones.filter(z=>z.direction!==null).length;
+        const mixed=analysis.zones.filter(z=>z.count>0 && z.direction===null).length;
+        orientationStatusEl.textContent=`${valid} of 9 zones have a mean downhill direction. ${mixed?`${mixed} zone(s) have mixed or cancelling slope directions. `:''}A dash indicates insufficient or inconsistent slope data. Arrows are sampled from bathymetry inside the survey area (stride: ${analysis.stride} pixel${analysis.stride===1?'':'s'}).`;
+      } catch(error) {
+        if(request!==orientationFinderToken) return;
+        orientationStatusEl.textContent=error.message||'Slope direction calculation failed.';
+        orientationStatusEl.classList.add('error');
+      }
+    });
+    closeOrientationFinderBtn.addEventListener('click',()=>closeOrientationFinder());
+    orientationModal.addEventListener('click',event=>{
+      if(event.target===orientationModal) closeOrientationFinder();
+    });
+    orientationModal.addEventListener('keydown',event=>{
+      if(event.key==='Escape') {event.preventDefault();event.stopPropagation();closeOrientationFinder();}
+      else if(event.key==='Tab') {event.preventDefault();closeOrientationFinderBtn.focus();}
+    });
+
     calculateDepthFromRasterBtn.addEventListener('click', async () => {
       const active = activeBathymetryLayer();
       const area = selectedSurveyAreaRecord();
@@ -1313,6 +1504,7 @@
     function closeSurveyModal() {
       if (surveyModal.hidden) return;
       if (!depthModal.hidden) closeDepthModal(false);
+      if (!orientationModal.hidden) closeOrientationFinder(false);
       surveyModal.hidden = true;
       document.body.style.overflow = '';
       planSurveyBtn.focus();
