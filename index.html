@@ -199,9 +199,9 @@
     .export-field label { margin-bottom: 8px; }
     .export-field .survey-area-select, .export-field .survey-name-input { width: 100%; }
     .export-note { font-size: 11px; color: #678494; line-height: 1.45; margin: 13px 0 0; }
-    .export-summary-pdf { display: block; width: 100%; border: 1px solid #ee9854; background: white; color: #a65419; border-radius: 7px; font-size: 13px; font-weight: 750; padding: 11px 13px; margin-top: 14px; }
-    .export-summary-pdf:hover:not(:disabled) { background: #fff6ee; }
-    .export-summary-pdf:disabled { opacity: .45; cursor: not-allowed; }
+    .export-summary-option { display: flex; align-items: center; gap: 9px; margin-top: 17px; font-size: 13px; font-weight: 700; color: #17334b; cursor: pointer; }
+    .export-summary-option input { accent-color: #2777a6; width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
+    .export-summary-option:has(input:disabled) { opacity: .55; cursor: not-allowed; }
     .export-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; margin-top: 20px; }
     .export-button { width: 100%; border: none; border-radius: 7px; padding: 12px 9px; font-size: 13px; font-weight: 750; background: #ee9854; color: #082b3f; }
     .export-button:hover { background: #f6ad71; }
@@ -367,7 +367,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.2</span>
+      <span>Version 1.7.3</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -727,7 +727,7 @@
         <h2 id="exportDialogTitle">Export Survey</h2>
         <button id="closeExportModal" class="survey-close" type="button" aria-label="Close Export Survey window">×</button>
       </div>
-      <p class="export-description">Export survey lines as GPX/KML, save the visible map as a georeferenced TIFF, or download a survey-plan summary PDF.</p>
+      <p class="export-description">Export survey lines as GPX/KML or the map as a GeoTIFF, optionally including a matching projected coverage TIFF and survey-plan summary PDF. Multiple files are saved together as a ZIP.</p>
       <div class="export-field">
         <label for="exportPlanSelect">Line Plan to Export</label>
         <select id="exportPlanSelect" class="survey-area-select">
@@ -747,9 +747,12 @@
         <select id="exportCoverageSelect" class="survey-area-select" aria-describedby="exportCoverageHint">
           <option value="">Do not include coverage TIFF</option>
         </select>
-        <p class="export-note" id="exportCoverageHint">Only coverage maps generated from the selected line plan are available. Selecting one bundles its TIFF with the survey-plan PDF in a ZIP.</p>
+        <p class="export-note" id="exportCoverageHint">Only coverage maps generated from the selected line plan are available.</p>
       </div>
-      <button id="exportPlanSummaryPdf" type="button" class="export-summary-pdf">Export Survey Plan Summary (PDF)</button>
+      <label class="export-summary-option" for="exportPlanSummaryPdf">
+        <input id="exportPlanSummaryPdf" type="checkbox">
+        <span>Export Survey Plan Summary (PDF) (optional)</span>
+      </label>
       <div class="export-field">
         <label for="exportFileName">File Name</label>
         <input id="exportFileName" class="survey-name-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="Line Plan">
@@ -760,7 +763,7 @@
         <button class="export-button" id="saveSurveyFile" type="button">Save As…</button>
         <button class="export-button secondary" id="downloadSurveyFile" type="button">Download</button>
       </div>
-      <p class="export-note">Save As… lets you choose a folder and file name in supported browsers (including Chrome on desktop). Download uses your browser's normal download location or prompt. GeoTIFF captures the visible map content (not the controls or floating legend) in EPSG:3857 and exports it at a higher resolution for sharper vector outlines.</p>
+      <p class="export-note">Save As… lets you choose a location in supported browsers. Download uses your normal download settings. Selecting more than one output packages everything into a ZIP. The map GeoTIFF captures visible map content in EPSG:3857 without controls or legends.</p>
     </section>
   </div>
 
@@ -1204,7 +1207,7 @@
     const exportMessage = document.getElementById('exportMessage');
     const saveSurveyFileBtn = document.getElementById('saveSurveyFile');
     const downloadSurveyFileBtn = document.getElementById('downloadSurveyFile');
-    const exportPlanSummaryPdfBtn = document.getElementById('exportPlanSummaryPdf');
+    const exportPlanSummaryPdfCheckbox = document.getElementById('exportPlanSummaryPdf');
 
 
     // Imported polygon shapefiles and hand-created polygons can both be
@@ -3093,8 +3096,8 @@
         exportCoverageSelect.value = previous;
       exportCoverageSelect.disabled = !plan || exportCoverageSelect.options.length < 2;
       exportCoverageHint.textContent = exportCoverageSelect.disabled
-        ? 'No projected coverage TIFF is available for this line plan. Calculate one first to include it with the PDF.'
-        : 'Optional: select a coverage TIFF generated from this line plan to export it with the PDF summary in one ZIP file.';
+        ? 'No projected coverage TIFF is available for this line plan. Calculate one first to include it in the export.'
+        : 'Optional: select a coverage TIFF generated from this line plan. It will be included with the selected exports.';
     }
     function selectedMatchingCoverage() {
       const selected = exportCoverageSelect.value;
@@ -3113,10 +3116,8 @@
       exportPlanSelect.disabled = !hasPlan;
       saveSurveyFileBtn.disabled = !mapMode && !hasPlan;
       downloadSurveyFileBtn.disabled = !mapMode && !hasPlan;
-      exportPlanSummaryPdfBtn.disabled = !hasPlan;
-      exportPlanSummaryPdfBtn.textContent = exportCoverageSelect.value
-        ? 'Export Survey Plan Summary + Coverage (ZIP)'
-        : 'Export Survey Plan Summary (PDF)';
+      exportPlanSummaryPdfCheckbox.disabled = !hasPlan;
+      if (!hasPlan) exportPlanSummaryPdfCheckbox.checked = false;
       document.getElementById('exportPlanNote').textContent = mapMode
         ? 'Exports the currently visible map with displayed layers in EPSG:3857 (Web Mercator). Map controls and the floating color legend are excluded. Requires readable map tiles.'
         : hasPlan
@@ -3182,74 +3183,53 @@
       showExportMessage('');
       refreshExportAvailability();
     });
+    exportPlanSummaryPdfCheckbox.addEventListener('change', () => showExportMessage(''));
     exportFormatSelect.addEventListener('change', () => {
       exportFileName.value = exportStem(exportFormatSelect.value === 'tif' ? 'BathTub Map' : selectedExportPlan()?.name || 'Line Plan');
       refreshExportAvailability();
       showExportMessage('');
     });
 
-    // Download a PDF with the exact same statistics as the three-dot summary.
-    exportPlanSummaryPdfBtn.addEventListener('click', async () => {
-      exportPlanSummaryPdfBtn.disabled = true;
-      try {
-        const plan = selectedExportPlan();
-        if (!plan) throw new Error('Choose a survey plan to export its summary.');
-        const chosenCoverage = selectedMatchingCoverage();
-        if (!window.jspdf?.jsPDF) throw new Error('The PDF library did not load. Check your connection and try again.');
-        if (chosenCoverage && typeof JSZip === 'undefined')
-          throw new Error('The ZIP library did not load. Check your connection and try again.');
-        const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
-        pdf.setFillColor(9, 45, 66);
-        pdf.rect(0, 0, 210, 36, 'F');
-        pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(19); pdf.text('BathTub | Survey Plan Summary', 16, 21);
-        pdf.setTextColor(30, 62, 81); pdf.setFontSize(12);
-        pdf.text(pdf.splitTextToSize(plan.name, 177), 16, 47);
-        const rows = getPlanSummaryRows(plan);
-        let y = 66;
-        planStatsFields.forEach(([heading], i) => {
-          if (i % 2 === 0) {
-            pdf.setFillColor(243, 248, 250);
-            pdf.rect(15, y - 7, 180, 13, 'F');
-          }
-          if (i === 7) {
-            pdf.setFillColor(253, 243, 233);
-            pdf.rect(15, y - 7, 180, 13, 'F');
-          }
-          pdf.setFontSize(10.5);
-          pdf.setTextColor(72, 101, 118); pdf.setFont('helvetica', 'normal');
-          pdf.text(heading, 19, y + 1);
-          pdf.setFont('helvetica', 'bold'); pdf.setTextColor(20, 48, 67);
-          pdf.text(rows[i], 190, y + 1, { align: 'right' });
-          y += 16;
-        });
-        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
-        pdf.setTextColor(95, 117, 132);
-        pdf.text(pdf.splitTextToSize(planStatsNote, 175), 16, y + 7);
-        pdf.setFontSize(8.5);
-        pdf.text('Created by Declan Tracy  |  BathTub', 16, 286);
-        const pdfName = `${exportStem(plan.name)}-summary.pdf`;
-        if (chosenCoverage) {
-          showExportMessage('Preparing PDF and matching coverage TIFF…');
-          const zip = new JSZip();
-          zip.file(pdfName, pdf.output('blob'));
-          zip.file(chosenCoverage.filename, chosenCoverage.blob);
-          const blob = await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:3}});
-          // The user gets both files reliably in one download rather than the
-          // browser potentially blocking multiple automatic downloads.
-          const zipName = `${exportStem(plan.name)}-summary-and-coverage.zip`;
-          downloadExportFile({filename:zipName,blob});
-          showExportMessage(`Downloaded ${zipName} with ${pdfName} and ${chosenCoverage.filename}.`);
-        } else {
-          pdf.save(pdfName);
-          showExportMessage(`Downloaded ${pdfName}.`);
+    // Produce the same PDF as the three-dot plan summary. No download here:
+    // Save As and Download now share one combined export workflow.
+    function getSurveyPlanSummaryPdfFile(plan) {
+      if (!plan) throw new Error('Choose a line plan to export its summary.');
+      if (!window.jspdf?.jsPDF) throw new Error('The PDF library did not load. Check your connection and try again.');
+      const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+      pdf.setFillColor(9, 45, 66);
+      pdf.rect(0, 0, 210, 36, 'F');
+      pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(19); pdf.text('BathTub | Survey Plan Summary', 16, 21);
+      pdf.setTextColor(30, 62, 81); pdf.setFontSize(12);
+      pdf.text(pdf.splitTextToSize(plan.name, 177), 16, 47);
+      const rows = getPlanSummaryRows(plan);
+      let y = 66;
+      planStatsFields.forEach(([heading], i) => {
+        if (i % 2 === 0) {
+          pdf.setFillColor(243, 248, 250);
+          pdf.rect(15, y - 7, 180, 13, 'F');
         }
-      } catch (error) {
-        showExportMessage(error.message || 'Unable to export the PDF summary.', true);
-      } finally {
-        refreshExportAvailability();
-      }
-    });
+        if (i === 7) {
+          pdf.setFillColor(253, 243, 233);
+          pdf.rect(15, y - 7, 180, 13, 'F');
+        }
+        pdf.setFontSize(10.5);
+        pdf.setTextColor(72, 101, 118); pdf.setFont('helvetica', 'normal');
+        pdf.text(heading, 19, y + 1);
+        pdf.setFont('helvetica', 'bold'); pdf.setTextColor(20, 48, 67);
+        pdf.text(rows[i], 190, y + 1, { align: 'right' });
+        y += 16;
+      });
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+      pdf.setTextColor(95, 117, 132);
+      pdf.text(pdf.splitTextToSize(planStatsNote, 175), 16, y + 7);
+      pdf.setFontSize(8.5);
+      pdf.text('Created by Declan Tracy  |  BathTub', 16, 286);
+      return {
+        filename: `${exportStem(plan.name)}-summary.pdf`,
+        blob: pdf.output('blob'), mime: 'application/pdf', format: 'pdf'
+      };
+    }
 
     // Escape user-generated names for XML, and drop characters invalid in XML 1.0.
     function xmlText(value) {
@@ -3505,15 +3485,58 @@
     async function currentExportFile() {
       return exportFormatSelect.value === 'tif' ? getMapGeoTIFF() : getSurveyExportFile();
     }
+    // Snapshots of selected add-ons are resolved before any asynchronous map
+    // rendering, and the matching coverage check uses the plan's unique ID.
+    function chosenSurveyExportOptions() {
+      const plan = selectedExportPlan();
+      const coverage = selectedMatchingCoverage();
+      const includePdf = exportPlanSummaryPdfCheckbox.checked;
+      if (includePdf && !plan) throw new Error('Select a line plan to include its PDF summary.');
+      if (coverage && !plan) throw new Error('Select a line plan for the projected coverage TIFF.');
+      const mapMode = exportFormatSelect.value === 'tif';
+      if (!mapMode && !plan) throw new Error('Choose a line plan to export survey lines.');
+      const outputCount = 1 + Number(!!coverage) + Number(includePdf);
+      const stem = exportStem(exportFileName.value || (mapMode ? 'BathTub Map' : plan?.name || 'Line Plan'));
+      if (outputCount > 1 && typeof JSZip === 'undefined')
+        throw new Error('The ZIP library did not load. Check your connection and try again.');
+      const filename = outputCount > 1 ? `${stem}-export.zip` : `${stem}.${exportFormatSelect.value}`;
+      return {plan,coverage,includePdf,outputCount,stem,filename,mapMode};
+    }
+    async function combinedSurveyExport(options) {
+      const mainFile = await currentExportFile();
+      const files = [mainFile];
+      if (options.coverage) files.push({
+        filename:options.coverage.filename,blob:options.coverage.blob,
+        mime:'image/tiff',format:'tif'
+      });
+      if (options.includePdf) files.push(getSurveyPlanSummaryPdfFile(options.plan));
+      if (files.length === 1) return {file:mainFile, contents:files};
+      const archive = new JSZip();
+      // Coverage TIFFs can be large and already contain compact categories;
+      // STORE avoids costly recompression while retaining the original bytes.
+      for (const part of files) {
+        archive.file(part.filename, part.blob, {
+          compression:part.format === 'tif' ? 'STORE' : 'DEFLATE'
+        });
+      }
+      const blob = await archive.generateAsync({
+        type:'blob', compression:'DEFLATE', compressionOptions:{level:3}
+      });
+      return {file:{filename:`${options.stem}-export.zip`,blob,
+        mime:'application/zip',format:'zip',count:files.length},contents:files};
+    }
     function exportFileSummary(file) {
-      return file.format === 'tif' ? `GeoTIFF map exported: ${file.filename} (EPSG:3857).`
+      return file.format === 'zip' ? `Exported ${file.count} files together: ${file.filename}.`
+        : file.format === 'tif' ? `GeoTIFF map exported: ${file.filename} (EPSG:3857).`
         : `${file.count} survey lines exported: ${file.filename}.`;
     }
     downloadSurveyFileBtn.addEventListener('click', async () => {
       downloadSurveyFileBtn.disabled = true;
+      saveSurveyFileBtn.disabled = true;
       showExportMessage('Preparing export…');
       try {
-        const file = await currentExportFile();
+        const options = chosenSurveyExportOptions();
+        const {file} = await combinedSurveyExport(options);
         downloadExportFile(file);
         showExportMessage(exportFileSummary(file));
       } catch (error) {
@@ -3522,39 +3545,44 @@
     });
     saveSurveyFileBtn.addEventListener('click', async () => {
       saveSurveyFileBtn.disabled = true;
-      const format = exportFormatSelect.value;
-      const mapMode = format === 'tif';
-      const stem = exportStem(exportFileName.value || (mapMode ? 'BathTub Map' : selectedExportPlan()?.name));
-      const mime = mapMode ? 'image/tiff' : format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
+      downloadSurveyFileBtn.disabled = true;
       try {
+        const options = chosenSurveyExportOptions();
+        const isZip = options.outputCount > 1;
+        const format = isZip ? 'zip' : exportFormatSelect.value;
+        const mime = isZip ? 'application/zip'
+          : format === 'tif' ? 'image/tiff'
+          : format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
+        const suggestedName = isZip ? `${options.stem}-export.zip` : options.filename;
         if (typeof window.showSaveFilePicker !== 'function') {
           showExportMessage('Preparing export…');
-          const file = await currentExportFile();
+          const {file} = await combinedSurveyExport(options);
           downloadExportFile(file);
           showExportMessage(`Save As is unsupported here. ${exportFileSummary(file)} The browser controls the destination folder.`);
           return;
         }
-        // Open picker synchronously with the original user click. Otherwise
-        // asynchronous image capture may consume the transient user gesture.
+        // Open the picker during the user gesture, before asynchronous map
+        // capture or ZIP generation could consume transient activation.
         const handle = await window.showSaveFilePicker({
-          suggestedName: `${stem}.${format}`,
-          types: [{ description: format.toUpperCase() + ' export', accept: { [mime]: ['.'+format] } }]
+          suggestedName,
+          types:[{description:format.toUpperCase()+' export',accept:{[mime]:['.'+format]}}]
         });
         showExportMessage('Preparing export…');
-        const file = await currentExportFile();
+        const {file} = await combinedSurveyExport(options);
         const writable = await handle.createWritable();
         try {
-          await writable.write(file.blob); await writable.close();
+          await writable.write(file.blob);
+          await writable.close();
         } catch (err) {
           try { await writable.abort(); } catch (_) {}
           throw err;
         }
-        showExportMessage(`Saved ${handle.name || file.filename}.`);
+        showExportMessage(`Saved ${handle.name || file.filename}${isZip ? ` containing ${options.outputCount} files` : ''}.`);
       } catch (error) {
         if (error.name !== 'AbortError') showExportMessage((error.message || 'Unable to save the file.') + ' Try Download instead.', true);
       } finally { refreshExportAvailability(); }
     });
-    // --- End survey-plan export -------------------------------------------------
+    // --- End survey-plan export
 
     // --- End survey-line generation ---------------------------------------------
 
