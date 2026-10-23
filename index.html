@@ -374,6 +374,12 @@
     .calc-description { margin: 0 0 14px; font-size: 11px; color: #507588; line-height: 1.5; }
     .calc-visual { border: 1px solid #b9d0db; background: #ffffff; padding: 10px; }
     .calc-visual svg { display: block; width: 100%; height: auto; }
+    .calc-inline-preview { margin: 0 0 16px; min-height: 210px; background: #ffffff; }
+    .calc-inline-preview.is-animating { background: #ffffff; }
+    .calc-inline-preview .calc-inline-header { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #17334b; }
+    .calc-inline-preview .calc-inline-description { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: #597788; }
+    .calc-inline-preview .calc-status { margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: #476b7c; }
+    .calc-inline-preview .calc-preview-empty { margin: 0; font-size: 12px; line-height: 1.5; color: #6a8391; padding: 8px 4px; }
     .calc-status { margin: 12px 0 0; font-size: 11px; color: #507588; line-height: 1.45; }
     /* A CSS transform runs reliably in Chrome even when bathymetry processing is busy.
        The rotating group uses its shape centroid as the pivot; the polygon clips the beam. */
@@ -693,6 +699,7 @@
       </div>
       <p class="depth-description">Calculate the mean of valid bathymetry pixel values inside your selected survey-area polygon. This mean value is calculated from a bathymetry TIFF layer that you have added to the project in the Layers panel. Only pixel centres inside the polygon count; NoData and polygon holes are excluded. The raster must be marked Bathymetry in Layers.</p>
       <div id="depthSource" class="depth-source" role="status"></div>
+      <div id="depthPreview" class="orientation-preview calc-inline-preview" role="img" aria-label="Selected survey area preview"></div>
       <button id="calculateDepthFromRaster" class="survey-draw depth-calculate" type="button">Calculate from bathymetry layer</button>
       <p id="depthResult" class="depth-result" role="status" aria-live="polite" hidden></p>
       <button id="applyCalculatedDepth" class="survey-draw depth-apply" type="button" hidden>Input water depth</button>
@@ -750,6 +757,7 @@
         </select>
       </div>
       <p id="coverageRasterSource" class="coverage-dialog-source" role="status"></p>
+      <div id="coveragePreview" class="orientation-preview calc-inline-preview" role="img" aria-label="Selected line plan survey area preview"></div>
       <div class="coverage-angle-row">
         <div><label for="coveragePortAngle">Port angle (°)</label>
           <input id="coveragePortAngle" class="survey-parameter-input" type="number" min="0" max="89.9" step="any" inputmode="decimal" placeholder="From vertical"></div>
@@ -1056,6 +1064,7 @@
     const calculateDepthBtn = document.getElementById('calculateDepthBtn');
     const closeDepthModalBtn = document.getElementById('closeDepthModal');
     const depthSourceEl = document.getElementById('depthSource');
+    const depthPreviewEl = document.getElementById('depthPreview');
     const depthResultEl = document.getElementById('depthResult');
     const calculateDepthFromRasterBtn = document.getElementById('calculateDepthFromRaster');
     const applyCalculatedDepthBtn = document.getElementById('applyCalculatedDepth');
@@ -1359,6 +1368,15 @@
       applyCalculatedDepthBtn.textContent = 'Input water depth';
       calculateDepthFromRasterBtn.classList.remove('is-complete');
     }
+    function updateDepthPreview() {
+      const selectedArea = selectedSurveyAreaRecord();
+      setStaticCalculationPreview(
+        depthPreviewEl,
+        validSurveyArea(selectedArea) ? selectedArea.sourceData : null,
+        'depth',
+        'Select a survey-area shapefile to preview it here.'
+      );
+    }
     function updateDepthSource() {
       const active = activeBathymetryLayer();
       const selectedArea = selectedSurveyAreaRecord();
@@ -1371,6 +1389,7 @@
         calculateDepthFromRasterBtn.textContent = `Calculate from ${active.rec.name}`;
       }
       calculateDepthFromRasterBtn.disabled = !active || !validArea;
+      updateDepthPreview();
     }
     function openDepthModal() {
       updateDepthSource();
@@ -1810,12 +1829,16 @@
       };
     }
 
-    function renderCalculationAnimation(sourceData, mode) {
-      const fallbackSvg = `
+    function renderCalculationAnimation(sourceData, mode, animated = true) {
+      const fallbackSvg = animated ? `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 250" role="img" aria-label="BathTub calculating animation">
           <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
           <path d="M90 180 L118 72 L268 54 L286 177 L196 205 Z" fill="#dcebf2" stroke="#2777a6" stroke-width="2"/>
           <g opacity=".9"><line x1="78" x2="292" y1="124" y2="124" stroke="#ee9854" stroke-width="2"><animate attributeName="y1" values="75;175;75" dur="2.8s" repeatCount="indefinite"/><animate attributeName="y2" values="75;175;75" dur="2.8s" repeatCount="indefinite"/></line></g>
+        </svg>` : `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 250" role="img" aria-label="BathTub survey area preview">
+          <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
+          <path d="M90 180 L118 72 L268 54 L286 177 L196 205 Z" fill="#dcebf2" stroke="#2777a6" stroke-width="2"/>
         </svg>`;
       try {
         const { projected } = projectedSurveyPolygons(sourceData);
@@ -1851,7 +1874,7 @@
           return `<line x1="18" y1="${y}" x2="342" y2="${y}" stroke="#dae8ef" stroke-width="1" opacity=".35"/>`;
         }).join('');
         let animatedInterior = '';
-        if (mode === 'depth') {
+        if (animated && mode === 'depth') {
           animatedInterior = `<g clip-path="url(#calcAreaClip)">
             <rect x="18" y="18" width="324" height="214" fill="none" stroke="#e7f1f5" stroke-width="0"/>
             <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#ee9854" stroke-width="2.6" opacity=".95">
@@ -1863,7 +1886,7 @@
               <animate attributeName="y2" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
             </line>
           </g>`;
-        } else if (mode === 'orientation') {
+        } else if (animated && mode === 'orientation') {
           const radius = Math.max(width, height) * .36;
           animatedInterior = `<g clip-path="url(#calcAreaClip)">
             <g class="calc-orientation-rotor" style="transform-origin: ${cx}px ${cy}px">
@@ -1872,7 +1895,7 @@
             </g>
             <circle cx="${cx}" cy="${cy}" r="4" fill="#ee9854"/>
           </g>`;
-        } else {
+        } else if (animated) {
           const theta = 334 * Math.PI / 180;
           const dxLine = Math.sin(theta), dyLine = Math.cos(theta);
           const nxLine = Math.cos(theta), nyLine = -Math.sin(theta);
@@ -1892,7 +1915,7 @@
             return `<line x1="${sx(xA).toFixed(3)}" y1="${sy(yA).toFixed(3)}" x2="${sx(xB).toFixed(3)}" y2="${sy(yB).toFixed(3)}" stroke="#ee9854" stroke-width="2.4" stroke-dasharray="7 5" opacity="0"><animate attributeName="opacity" values="0;1;1" dur="0.85s" begin="${begin}s" fill="freeze"/></line>`;
           }).join('') + `</g>`;
         }
-        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="BathTub calculating animation">
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${animated ? 'BathTub calculating animation' : 'BathTub survey area preview'}">
           <defs><clipPath id="calcAreaClip"><path d="${pathData}" fill-rule="evenodd"/></clipPath></defs>
           <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
           ${grid}
@@ -1903,6 +1926,24 @@
         console.warn('Calculation animation preview fallback used:', error);
         return fallbackSvg;
       }
+    }
+
+    function renderCalculationPanel(sourceData, mode) {
+      const copy = calculationAnimationCopy(mode);
+      return `<div class="calc-inline-header">${copy.title}</div>
+        <p class="calc-inline-description">${copy.description}</p>
+        <div class="calc-visual">${renderCalculationAnimation(sourceData, mode, true)}</div>
+        <p class="calc-status">${copy.status}</p>`;
+    }
+
+    function setStaticCalculationPreview(containerEl, sourceData, mode, emptyMessage) {
+      if (!containerEl) return;
+      containerEl.classList.remove('is-animating');
+      if (!sourceData) {
+        containerEl.innerHTML = `<p class="calc-preview-empty">${emptyMessage}</p>`;
+        return;
+      }
+      containerEl.innerHTML = renderCalculationAnimation(sourceData, mode, false);
     }
 
     function openCalculationModal(mode, sourceData) {
@@ -1919,12 +1960,17 @@
       calculationVisualEl.replaceChildren();
     }
 
-    async function withCalculationAnimation(mode, sourceData, task) {
+    async function withCalculationAnimation(mode, sourceData, task, targetEl = null) {
       const token = ++calculationOverlayToken;
       const started = performance.now();
       let result;
       let error;
-      openCalculationModal(mode, sourceData);
+      if (targetEl) {
+        targetEl.classList.add('is-animating');
+        targetEl.innerHTML = renderCalculationPanel(sourceData, mode);
+      } else {
+        openCalculationModal(mode, sourceData);
+      }
       // Give the browser a frame to display the animation before starting
       // bathymetry analysis, which can occupy the main thread briefly.
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -1932,7 +1978,14 @@
       catch (err) { error = err; }
       const elapsed = performance.now() - started;
       if (elapsed < 3000) await new Promise(resolve => setTimeout(resolve, 3000 - elapsed));
-      if (token === calculationOverlayToken) closeCalculationModal();
+      if (token === calculationOverlayToken) {
+        if (targetEl) {
+          targetEl.classList.remove('is-animating');
+          targetEl.replaceChildren();
+        } else {
+          closeCalculationModal();
+        }
+      }
       if (error) throw error;
       return result;
     }
@@ -1949,7 +2002,12 @@
       const request=++orientationFinderToken;
       const area=selectedSurveyAreaRecord();
       const raster=activeBathymetryLayer();
-      orientationPreviewEl.replaceChildren();
+      setStaticCalculationPreview(
+        orientationPreviewEl,
+        validSurveyArea(area) ? area.sourceData : null,
+        'orientation',
+        'Select a survey-area polygon to preview it here.'
+      );
       orientationSummaryEl.hidden=true;
       applySuggestedOrientationBtn.hidden=true;
       showSuggestedOrientationBtn.hidden=true;
@@ -1985,7 +2043,8 @@
       await new Promise(resolve=>setTimeout(resolve,0));
       try {
         const analysis=await withCalculationAnimation('orientation', area.sourceData, () =>
-          calculateOrientationZones(area.sourceData,raster.rec.rasterConfig.georaster)
+          calculateOrientationZones(area.sourceData,raster.rec.rasterConfig.georaster),
+          orientationPreviewEl
         );
         if (request!==orientationFinderToken || orientationModal.hidden) return;
         if (surveyAreaSelect.value!==selectedId || activeBathymetryLayer()?.id!==rasterId)
@@ -2062,7 +2121,8 @@
       await new Promise(resolve => setTimeout(resolve, 0));
       try {
         const stats = await withCalculationAnimation('depth', area.sourceData, () =>
-          computeBathymetryPolygonMean(area.sourceData, active.rec.rasterConfig.georaster)
+          computeBathymetryPolygonMean(area.sourceData, active.rec.rasterConfig.georaster),
+          depthPreviewEl
         );
         if (activeBathymetryLayer()?.id !== selectedRasterId || surveyAreaSelect.value !== selectedAreaId) {
           throw new Error('The selected layers changed during calculation. Please retry.');
@@ -2079,7 +2139,6 @@
       } finally {
         calculateDepthFromRasterBtn.textContent = oldText;
         updateDepthSource();
-        
       }
     });
 
@@ -2543,7 +2602,7 @@
             const effectiveSwath = lineSpacingModeEl.value === 'swath' ? computeSwathWidthMetres() : spacing;
             const context = surveyGridContext(selected.sourceData, bearing);
             estimate = optimizeSurveyOffset(context, spacing, effectiveSwath, speed, turnTime, overshootMeters);
-          } else {
+          } else if (animated) {
             const geometry = generateSurveyGeometry(selected.sourceData, spacing, bearing, {overshootMeters});
             const turns = Math.max(0, geometry.segmentCount - 1);
             estimate = {totalMeters:geometry.totalMeters,segmentCount:geometry.segmentCount,turns,
@@ -3096,12 +3155,22 @@
     const closeProjectedCoverageBtn = document.getElementById('closeProjectedCoverage');
     const coveragePlanSelect = document.getElementById('coveragePlanSelect');
     const coverageRasterSource = document.getElementById('coverageRasterSource');
+    const coveragePreviewEl = document.getElementById('coveragePreview');
     const coveragePortAngle = document.getElementById('coveragePortAngle');
     const coverageStarboardAngle = document.getElementById('coverageStarboardAngle');
     const calculateProjectedCoverageBtn = document.getElementById('calculateProjectedCoverage');
     const projectedCoverageError = document.getElementById('projectedCoverageError');
 
     function selectedCoveragePlan() { return plannedRecords.get(coveragePlanSelect.value) || null; }
+    function updateCoveragePreview() {
+      const plan = selectedCoveragePlan();
+      setStaticCalculationPreview(
+        coveragePreviewEl,
+        plan?.areaGeojson || null,
+        'coverage',
+        'Select a line plan to preview its survey area here.'
+      );
+    }
     function updateCoverageSelection() {
       const plan = selectedCoveragePlan();
       if (plan) {
@@ -3119,6 +3188,7 @@
       coverageRasterSource.textContent = message;
       calculateProjectedCoverageBtn.disabled = !plan || !bathy;
       projectedCoverageError.hidden = true;
+      updateCoveragePreview();
     }
     function openProjectedCoverageModal() {
       coveragePlanSelect.replaceChildren(new Option('Select a line plan…',''));
@@ -3188,7 +3258,8 @@
         const coverage = await withCalculationAnimation('coverage', plan.areaGeojson, () =>
           calculateProjectedCoverage(plan.areaGeojson,
             {type:'FeatureCollection', features:currentLines}, bathy.rec.rasterConfig.georaster,
-            portAngle, starboardAngle, plan.name)
+            portAngle, starboardAngle, plan.name),
+          coveragePreviewEl
         );
         if (!plannedRecords.has(plan.id)) throw new Error('The selected line plan was removed during calculation.');
         plan.coverage = coverage;
@@ -3219,6 +3290,7 @@
       } finally {
         calculateProjectedCoverageBtn.textContent = originalText;
         calculateProjectedCoverageBtn.disabled = false;
+        updateCoverageSelection();
       }
     });
 
@@ -3281,7 +3353,7 @@
           optimization = optimizeSurveyOffset(context, spacing, effectiveSwath, speedKnots, turnMinutes, overshootMeters);
           result = generateSurveyGeometry(record.sourceData, spacing, bearing,
             { context, phase: optimization.phase, overshootMeters });
-        } else {
+        } else if (animated) {
           result = generateSurveyGeometry(record.sourceData, spacing, bearing, {overshootMeters});
         }
         // Preserve the original polygon and optional beam angles for later coverage analysis.
@@ -3999,7 +4071,7 @@
         let ring;
         if (drawing.method === 'freehand') {
           ring = drawing.corners.map(p => [p.lng, p.lat]);
-        } else {
+        } else if (animated) {
           const end = drawing.current || event.latlng;
           const west = Math.min(drawing.start.lng, end.lng), east = Math.max(drawing.start.lng, end.lng);
           const south = Math.min(drawing.start.lat, end.lat), north = Math.max(drawing.start.lat, end.lat);
