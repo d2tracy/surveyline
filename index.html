@@ -377,7 +377,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.4</span>
+      <span>Version 1.7.5</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -598,7 +598,16 @@
         </details>
         <details id="advancedSection" class="survey-accordion">
           <summary>Advanced</summary>
-          <div class="survey-accordion-empty">No advanced settings yet.</div>
+          <div class="survey-accordion-body">
+            <div class="survey-field">
+              <label for="surveyOvershootValue">Overshoot survey area (m)</label>
+              <div class="survey-input-unit">
+                <input id="surveyOvershootValue" class="survey-parameter-input" type="number" min="0" max="10000" step="any" inputmode="decimal" value="0" aria-describedby="surveyOvershootHint" aria-label="Extend survey lines beyond the polygon at each end, in metres">
+                <span aria-hidden="true">m</span>
+              </div>
+              <p id="surveyOvershootHint" class="optimization-description">Extend both ends of each planned line beyond the survey-area boundary. Default: 0 m. Check obstacles, exclusion zones and safe turning room before operating outside the polygon.</p>
+            </div>
+          </div>
         </details>
       </div>
       <details id="surveyExtraOptions" class="survey-accordion survey-accordion-extra">
@@ -981,6 +990,7 @@
     const drawSurveyBtn = document.getElementById('drawSurveyLines');
     const surveyErrorEl = document.getElementById('surveyError');
     const linePlanNameEl = document.getElementById('linePlanName');
+    const surveyOvershootEl = document.getElementById('surveyOvershootValue');
     const lineSpacingModeEl = document.getElementById('lineSpacingMode');
     const lineSpacingValueEl = document.getElementById('lineSpacingValue');
     const lineSpacingHintEl = document.getElementById('lineSpacingHint');
@@ -1021,6 +1031,13 @@
 
     function readOptionalNumber(field) {
       return field.value.trim() === '' ? NaN : Number(field.value);
+    }
+    function readSurveyOvershoot() {
+      const raw = surveyOvershootEl.value.trim();
+      const value = raw === '' ? 0 : Number(raw);
+      if (!Number.isFinite(value) || value < 0 || value > 10000)
+        throw new Error('Overshoot survey area must be between 0 and 10,000 metres.');
+      return value;
     }
     function validBeamAngle(degrees) {
       return Number.isFinite(degrees) && degrees >= 0 && degrees < 90;
@@ -1207,7 +1224,9 @@
     function refreshPlanStatsPopup() {
       const record = plannedRecords.get(activePlanStatsId);
       if (!record) { closePlanStatsModal(); return; }
-      document.getElementById('planStatsName').textContent = record.name + (record.optimization ? ' · BathTub Optimized Survey' : '');
+      document.getElementById('planStatsName').textContent = record.name
+        + (record.optimization ? ' · BathTub Optimized Survey' : '')
+        + (record.overshootMeters > 0 ? ` · ${record.overshootMeters} m overshoot at each end` : '');
       const values = getPlanSummaryRows(record);
       planStatsFields.forEach(([_, id], i) => {
         document.getElementById(id).textContent = values[i];
@@ -2125,7 +2144,7 @@
 
     // Survey time model matches the plan summary: segments / vessel speed plus
     // one fixed turn allowance between consecutive survey segments.
-    function evaluateSurveyOffset(context, spacing, phase, swathWidth, speedKnots, turnMinutes) {
+    function evaluateSurveyOffset(context, spacing, phase, swathWidth, speedKnots, turnMinutes, overshootMeters = 0) {
       const { shaped, minU, maxU, width } = context;
       if (!Number.isFinite(phase) || phase < 0 || phase >= spacing || spacing > swathWidth + 1e-8) return null;
       const firstU = minU + phase;
@@ -2145,8 +2164,8 @@
           lastActive = u;
           segmentCount += segments.length;
           for (const [v0, v1] of segments) {
-            totalMeters += v1 - v0;
-            activeSegments.push({ u, v0, v1 });
+            totalMeters += (v1 - v0) + 2 * overshootMeters;
+            activeSegments.push({ u, v0: v0 - overshootMeters, v1: v1 + overshootMeters });
           }
         }
       }
@@ -2172,7 +2191,7 @@
       return { phase, minutes, totalMeters, segmentCount, turns, margin };
     }
 
-    function optimizeSurveyOffset(context, spacing, swathWidth, speedKnots, turnMinutes) {
+    function optimizeSurveyOffset(context, spacing, swathWidth, speedKnots, turnMinutes, overshootMeters = 0) {
       // Precompute the same sample points for every offset evaluated. Avoid
       // repeated polygon boundary sampling during the optimization search.
       const probeCount = Math.min(85, Math.max(14, Math.ceil(context.width / Math.max(swathWidth / 3, 1))));
@@ -2221,7 +2240,7 @@
       const evaluate = phase => {
         if (phase >= spacing) return;
         tested++;
-        const candidate = evaluateSurveyOffset(context, spacing, phase, swathWidth, speedKnots, turnMinutes);
+        const candidate = evaluateSurveyOffset(context, spacing, phase, swathWidth, speedKnots, turnMinutes, overshootMeters);
         if (!candidate) return;
         valid++;
         if (!best || candidate.minutes < best.minutes - 1e-7 ||
@@ -2243,6 +2262,9 @@
     function generateSurveyGeometry(data, spacing, bearingDegrees, options = {}) {
       const context = options.context || surveyGridContext(data, bearingDegrees);
       const { projection, shaped, minU, maxU, width, dx, dy, nx, ny } = context;
+      const overshootMeters = options.overshootMeters ?? 0;
+      if (!Number.isFinite(overshootMeters) || overshootMeters < 0 || overshootMeters > 10000)
+        throw new Error('Overshoot survey area must be between 0 and 10,000 metres.');
       // Preserve the unchanged default, centered-line placement behavior.
       const numberOfLines = options.phase == null
         ? Math.max(1, Math.ceil(width / spacing - 1e-9))
@@ -2260,25 +2282,32 @@
         const u = firstU + i * spacing;
         const segments = mergeSurveySegments(shaped.flatMap(polygon => lineSegmentsInPolygon(polygon, u)));
         for (const [v0, v1] of segments) {
+          // Overshoot is applied along the *track*, measured in metres in the
+          // survey's local WGS84 Transverse Mercator projection. Extend both
+          // endpoints of each clipped segment; do not alter line spacing.
+          const extendedStart = v0 - overshootMeters;
+          const extendedEnd = v1 + overshootMeters;
+          const extendedLength = extendedEnd - extendedStart;
           const toLonLat = v => projection.inverse([u * nx + v * dx, u * ny + v * dy]);
           // A constant projected XY line becomes slightly curved in geographic
           // coordinates. Intermediate points preserve it in Leaflet and export.
-          const divisions = Math.max(1, Math.ceil((v1 - v0) / maximumVertexIntervalMeters));
+          const divisions = Math.max(1, Math.ceil(extendedLength / maximumVertexIntervalMeters));
           totalVertices += divisions + 1;
           if (totalVertices > maximumVertices) {
             throw new Error('This plan would contain too many line vertices. Increase the line spacing or divide the survey area.');
           }
           const coordinates = [];
           for (let j = 0; j <= divisions; j++) {
-            const lonLat = toLonLat(v0 + (v1 - v0) * j / divisions);
+            const lonLat = toLonLat(extendedStart + extendedLength * j / divisions);
             if (lonLat.some(x => !Number.isFinite(x))) {
               throw new Error('Unable to convert generated survey lines to WGS84.');
             }
             coordinates.push(lonLat);
           }
-          features.push({ type: 'Feature', properties: { line: i + 1, heading_deg: bearingDegrees, spacing_m: spacing, length_m: v1 - v0 },
+          features.push({ type: 'Feature', properties: { line: i + 1, heading_deg: bearingDegrees, spacing_m: spacing,
+            overshoot_m: overshootMeters, length_m: extendedLength },
             geometry: { type: 'LineString', coordinates } });
-          totalMeters += v1 - v0;
+          totalMeters += extendedLength;
           if (features.length > 10000) throw new Error('This survey produces too many separate line segments. Increase spacing or simplify the polygon.');
         }
       }
@@ -2303,6 +2332,9 @@
       const spacing = lineSpacingModeEl.value === 'swath' ? calculatedSpacingMetres : readOptionalNumber(lineSpacingValueEl);
       const bearing = readOptionalNumber(document.getElementById('lineOrientationValue'));
       const speed = readOptionalNumber(surveySpeedValueEl), turnTime = readOptionalNumber(turnTimeValueEl);
+      let overshootMeters;
+      try { overshootMeters = readSurveyOvershoot(); }
+      catch (error) { setSurveyTimeStatus(error.message, true); return; }
       if (!validSurveyArea(selected) || !(spacing > 0) || !(bearing >= 0 && bearing < 360) ||
           !(speed > 0) || !(turnTime >= 0)) {
         setSurveyTimeStatus('Enter a survey area, line spacing, orientation, speed and turn time to calculate.');
@@ -2316,9 +2348,9 @@
           if (currentSurveyPlacement() === 'optimized') {
             const effectiveSwath = lineSpacingModeEl.value === 'swath' ? computeSwathWidthMetres() : spacing;
             const context = surveyGridContext(selected.sourceData, bearing);
-            estimate = optimizeSurveyOffset(context, spacing, effectiveSwath, speed, turnTime);
+            estimate = optimizeSurveyOffset(context, spacing, effectiveSwath, speed, turnTime, overshootMeters);
           } else {
-            const geometry = generateSurveyGeometry(selected.sourceData, spacing, bearing);
+            const geometry = generateSurveyGeometry(selected.sourceData, spacing, bearing, {overshootMeters});
             const turns = Math.max(0, geometry.segmentCount - 1);
             estimate = {totalMeters:geometry.totalMeters,segmentCount:geometry.segmentCount,turns,
               minutes: geometry.totalMeters / (speed * 1852) * 60 + turns * turnTime};
@@ -2340,7 +2372,7 @@
       el.addEventListener('change', scheduleSurveyTimeEstimate));
     [lineSpacingValueEl, swathWidthValueEl, swathDepthValueEl, portBeamAngleValueEl,
      starboardBeamAngleValueEl, swathOverlapValueEl, document.getElementById('lineOrientationValue'),
-     surveySpeedValueEl, turnTimeValueEl].forEach(el =>
+     surveySpeedValueEl, turnTimeValueEl, surveyOvershootEl].forEach(el =>
       el.addEventListener('input', scheduleSurveyTimeEstimate));
     surveyPlacementRadios.forEach(el => el.addEventListener('change', scheduleSurveyTimeEstimate));
     updateSurveyTimeMode();
@@ -2355,7 +2387,7 @@
       const passes = new Set(lines.map(line => line.passNumber)).size;
       const totalMeters = lines.reduce((sum, line) => sum + line.lengthMeters, 0);
       record.details.querySelector('.planned-summary').textContent =
-        `${record.optimization ? 'BathTub Optimized · ' : ''}${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km`;
+        `${record.optimization ? 'BathTub Optimized · ' : ''}${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km${record.overshootMeters > 0 ? ` · ${record.overshootMeters} m overshoot per end` : ''}`;
       record.element.querySelector('.planned-name').title = `${record.name} (${record.sourceName})`;
       if (!planStatsModal.hidden && activePlanStatsId === record.id) refreshPlanStatsPopup();
     }
@@ -2794,7 +2826,7 @@
     }
     // -- End projected coverage -----------------------------------------------
 
-    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes, optimization = null, coverage = null, manualSurveyMinutes = NaN, areaGeojson = null, portAngle = NaN, starboardAngle = NaN) {
+    function registerSurveyPlan(sourceName, name, result, spacing, bearingDegrees, speedKnots, turnMinutes, optimization = null, coverage = null, manualSurveyMinutes = NaN, areaGeojson = null, portAngle = NaN, starboardAngle = NaN, overshootMeters = 0) {
       const planNumber = nextPlanId++;
       const id = String(planNumber);
       const lineEntries = new Map();
@@ -2851,7 +2883,7 @@
         lineList.append(row);
       }
       const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization, coverage,
-        areaGeojson, portAngle, starboardAngle, coverageLayerId: null,
+        areaGeojson, portAngle, starboardAngle, overshootMeters, coverageLayerId: null,
         speedKnots, turnMinutes, manualSurveyMinutes, layer, bounds, lines: lineEntries, element: item, details };
       plannedRecords.set(id, record);
       plannedLinesEl.append(item);
@@ -3035,6 +3067,7 @@
         if (manualTiming && currentSurveyPlacement() === 'optimized') {
           throw new Error('BathTub Optimized Survey requires Calculate from speed + turns; select that timing method or use Default placement.');
         }
+        const overshootMeters = readSurveyOvershoot();
         const planName = linePlanNameEl.value.trim().slice(0, 80) || 'Line Plan';
         let optimization = null;
         let result;
@@ -3049,17 +3082,18 @@
             ? computeSwathWidthMetres() : spacing;
           if (!(effectiveSwath > 0)) throw new Error('Enter a valid effective swath width to optimize coverage.');
           const context = surveyGridContext(record.sourceData, bearing);
-          optimization = optimizeSurveyOffset(context, spacing, effectiveSwath, speedKnots, turnMinutes);
+          optimization = optimizeSurveyOffset(context, spacing, effectiveSwath, speedKnots, turnMinutes, overshootMeters);
           result = generateSurveyGeometry(record.sourceData, spacing, bearing,
-            { context, phase: optimization.phase });
+            { context, phase: optimization.phase, overshootMeters });
         } else {
-          result = generateSurveyGeometry(record.sourceData, spacing, bearing);
+          result = generateSurveyGeometry(record.sourceData, spacing, bearing, {overshootMeters});
         }
         // Preserve the original polygon and optional beam angles for later coverage analysis.
         registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes,
           optimization, null, manualTiming ? manualMinutes : NaN, record.sourceData,
           validBeamAngle(readOptionalNumber(portBeamAngleValueEl)) ? readOptionalNumber(portBeamAngleValueEl) : NaN,
-          validBeamAngle(readOptionalNumber(starboardBeamAngleValueEl)) ? readOptionalNumber(starboardBeamAngleValueEl) : NaN);
+          validBeamAngle(readOptionalNumber(starboardBeamAngleValueEl)) ? readOptionalNumber(starboardBeamAngleValueEl) : NaN,
+          overshootMeters);
         closeSurveyModal();
       } catch (err) {
         surveyErrorEl.textContent = err.message || 'Unable to draw survey lines.';
