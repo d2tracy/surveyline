@@ -364,16 +364,17 @@
     }
     .survey-modal-backdrop[hidden] { display: none; }
   
-    /* Shared analogue-style calculation animation overlay for BathTub tools. */
-    .calc-backdrop { z-index: 2700; background: rgba(4, 14, 20, .74); }
-    .calc-dialog { width: min(430px, 100%); background: #081922; color: #d7ede8; border: 1px solid #36535d; border-radius: 0; box-shadow: 0 20px 64px rgba(0,0,0,.48), inset 0 0 0 1px rgba(130, 190, 190, .08); }
+    /* Three calculating overlays: classic BathTub white/blue/orange palette.
+       The monospace instrumentation labels retain their analogue feel. */
+    .calc-backdrop { z-index: 2700; background: rgba(7, 27, 41, .58); }
+    .calc-dialog { width: min(430px, 100%); background: #ffffff; color: #17334b; border: 1px solid #b9d0db; border-radius: 0; box-shadow: 0 18px 60px rgba(0, 18, 29, .32); }
     .calc-dialog .survey-dialog-head { margin-bottom: 12px; }
-    .calc-dialog h2 { color: #e5f7f0; font-size: 21px; letter-spacing: .04em; }
-    .calc-description, .calc-status { font-family: "Courier New", Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
-    .calc-description { margin: 0 0 14px; font-size: 11px; color: #93b6b6; line-height: 1.5; }
-    .calc-visual { border: 1px solid #31515b; background: linear-gradient(180deg, #07161d 0%, #0b222b 100%); padding: 10px; }
+    .calc-dialog h2 { color: #17334b; font-size: 21px; letter-spacing: .01em; }
+    .calc-description, .calc-status { font-family: "Courier New", Consolas, monospace; text-transform: uppercase; letter-spacing: .06em; }
+    .calc-description { margin: 0 0 14px; font-size: 11px; color: #507588; line-height: 1.5; }
+    .calc-visual { border: 1px solid #b9d0db; background: #ffffff; padding: 10px; }
     .calc-visual svg { display: block; width: 100%; height: auto; }
-    .calc-status { margin: 12px 0 0; font-size: 11px; color: #9bc0b8; line-height: 1.45; }
+    .calc-status { margin: 12px 0 0; font-size: 11px; color: #507588; line-height: 1.45; }
 
   </style>
 </head>
@@ -389,7 +390,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.6</span>
+      <span>Version 1.7.7</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1800,9 +1801,9 @@
     function renderCalculationAnimation(sourceData, mode) {
       const fallbackSvg = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 250" role="img" aria-label="BathTub calculating animation">
-          <rect x="18" y="18" width="324" height="214" fill="#0a1b22" stroke="#3f5b65" stroke-width="1"/>
-          <path d="M90 180 L118 72 L268 54 L286 177 L196 205 Z" fill="#102630" stroke="#8dd1cb" stroke-width="2"/>
-          <g opacity=".9"><line x1="78" x2="292" y1="124" y2="124" stroke="#df9a57" stroke-width="2"><animate attributeName="y1" values="75;175;75" dur="1.7s" repeatCount="indefinite"/><animate attributeName="y2" values="75;175;75" dur="1.7s" repeatCount="indefinite"/></line></g>
+          <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
+          <path d="M90 180 L118 72 L268 54 L286 177 L196 205 Z" fill="#dcebf2" stroke="#2777a6" stroke-width="2"/>
+          <g opacity=".9"><line x1="78" x2="292" y1="124" y2="124" stroke="#ee9854" stroke-width="2"><animate attributeName="y1" values="75;175;75" dur="2.8s" repeatCount="indefinite"/><animate attributeName="y2" values="75;175;75" dur="2.8s" repeatCount="indefinite"/></line></g>
         </svg>`;
       try {
         const { projected } = projectedSurveyPolygons(sourceData);
@@ -1822,7 +1823,7 @@
         const pathData = projected.map(poly => poly.map(ring => ring.map((pt, i) => (i ? 'L' : 'M') + pointString(pt)).join(' ') + ' Z').join(' ')).join(' ');
         const outline = projected.map(poly => {
           const parts = poly.map(ring => ring.map((pt, i) => (i ? 'L' : 'M') + pointString(pt)).join(' ') + ' Z');
-          return `<path d="${parts.join(' ')}" fill="#102630" fill-rule="evenodd" stroke="#8dd1cb" stroke-width="2"/>`;
+          return `<path d="${parts.join(' ')}" fill="#dcebf2" fill-rule="evenodd" stroke="#2777a6" stroke-width="2"/>`;
         }).join('');
         const center = surveyReferencePoint(projected);
         const cx = sx(center[0]).toFixed(3), cy = sy(center[1]).toFixed(3);
@@ -1832,33 +1833,33 @@
         const bottom = (Math.max(...points.map(p => sy(p[1]))) + 6).toFixed(3);
         const grid = Array.from({ length: 10 }, (_, i) => {
           const x = 22 + i * 32;
-          return `<line x1="${x}" y1="18" x2="${x}" y2="232" stroke="#173642" stroke-width="1" opacity=".45"/>`;
+          return `<line x1="${x}" y1="18" x2="${x}" y2="232" stroke="#dae8ef" stroke-width="1" opacity=".45"/>`;
         }).join('') + Array.from({ length: 7 }, (_, i) => {
           const y = 22 + i * 30;
-          return `<line x1="18" y1="${y}" x2="342" y2="${y}" stroke="#173642" stroke-width="1" opacity=".35"/>`;
+          return `<line x1="18" y1="${y}" x2="342" y2="${y}" stroke="#dae8ef" stroke-width="1" opacity=".35"/>`;
         }).join('');
         let animatedInterior = '';
         if (mode === 'depth') {
           animatedInterior = `<g clip-path="url(#calcAreaClip)">
-            <rect x="18" y="18" width="324" height="214" fill="none" stroke="#13303a" stroke-width="0"/>
-            <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#df9a57" stroke-width="2.6" opacity=".95">
-              <animate attributeName="y1" values="${top};${bottom};${top}" dur="1.8s" repeatCount="indefinite"/>
-              <animate attributeName="y2" values="${top};${bottom};${top}" dur="1.8s" repeatCount="indefinite"/>
+            <rect x="18" y="18" width="324" height="214" fill="none" stroke="#e7f1f5" stroke-width="0"/>
+            <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#ee9854" stroke-width="2.6" opacity=".95">
+              <animate attributeName="y1" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
+              <animate attributeName="y2" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
             </line>
-            <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#f0d5a1" stroke-width="7" opacity=".12">
-              <animate attributeName="y1" values="${top};${bottom};${top}" dur="1.8s" repeatCount="indefinite"/>
-              <animate attributeName="y2" values="${top};${bottom};${top}" dur="1.8s" repeatCount="indefinite"/>
+            <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#f4b783" stroke-width="7" opacity=".12">
+              <animate attributeName="y1" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
+              <animate attributeName="y2" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
             </line>
           </g>`;
         } else if (mode === 'orientation') {
           const radius = Math.max(width, height) * .36;
           animatedInterior = `<g clip-path="url(#calcAreaClip)">
             <g transform-origin="${cx} ${cy}">
-              <line x1="${(Number(cx) - radius).toFixed(3)}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#df9a57" stroke-width="2.8" stroke-linecap="round"/>
-              <line x1="${cx}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#f3d2a8" stroke-width="7" stroke-linecap="round" opacity=".08"/>
-              <animateTransform attributeName="transform" type="rotate" values="0 ${cx} ${cy};360 ${cx} ${cy}" dur="1.8s" repeatCount="indefinite"/>
+              <line x1="${(Number(cx) - radius).toFixed(3)}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#ee9854" stroke-width="2.8" stroke-linecap="round"/>
+              <line x1="${cx}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#f4b783" stroke-width="7" stroke-linecap="round" opacity=".08"/>
+              <animateTransform attributeName="transform" type="rotate" values="0 ${cx} ${cy};360 ${cx} ${cy}" dur="3s" repeatCount="indefinite"/>
             </g>
-            <circle cx="${cx}" cy="${cy}" r="4" fill="#df9a57"/>
+            <circle cx="${cx}" cy="${cy}" r="4" fill="#ee9854"/>
           </g>`;
         } else {
           const theta = 334 * Math.PI / 180;
@@ -1876,13 +1877,13 @@
             const py = nyLine * offset;
             const xA = px - dxLine * diagonal, yA = py - dyLine * diagonal;
             const xB = px + dxLine * diagonal, yB = py + dyLine * diagonal;
-            const begin = (i * 0.09).toFixed(2);
-            return `<line x1="${sx(xA).toFixed(3)}" y1="${sy(yA).toFixed(3)}" x2="${sx(xB).toFixed(3)}" y2="${sy(yB).toFixed(3)}" stroke="#df9a57" stroke-width="2.4" stroke-dasharray="7 5" opacity="0"><animate attributeName="opacity" values="0;1;1" dur="1.6s" begin="${begin}s" fill="freeze"/></line>`;
+            const begin = (i * 0.18).toFixed(2);
+            return `<line x1="${sx(xA).toFixed(3)}" y1="${sy(yA).toFixed(3)}" x2="${sx(xB).toFixed(3)}" y2="${sy(yB).toFixed(3)}" stroke="#ee9854" stroke-width="2.4" stroke-dasharray="7 5" opacity="0"><animate attributeName="opacity" values="0;1;1" dur="0.85s" begin="${begin}s" fill="freeze"/></line>`;
           }).join('') + `</g>`;
         }
         return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="BathTub calculating animation">
           <defs><clipPath id="calcAreaClip"><path d="${pathData}" fill-rule="evenodd"/></clipPath></defs>
-          <rect x="18" y="18" width="324" height="214" fill="#0a1b22" stroke="#3f5b65" stroke-width="1"/>
+          <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
           ${grid}
           ${outline}
           ${animatedInterior}
@@ -1913,10 +1914,13 @@
       let result;
       let error;
       openCalculationModal(mode, sourceData);
+      // Give the browser a frame to display the animation before starting
+      // bathymetry analysis, which can occupy the main thread briefly.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       try { result = await task(); }
       catch (err) { error = err; }
       const elapsed = performance.now() - started;
-      if (elapsed < 2000) await new Promise(resolve => setTimeout(resolve, 2000 - elapsed));
+      if (elapsed < 3000) await new Promise(resolve => setTimeout(resolve, 3000 - elapsed));
       if (token === calculationOverlayToken) closeCalculationModal();
       if (error) throw error;
       return result;
