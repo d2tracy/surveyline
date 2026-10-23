@@ -408,7 +408,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.8</span>
+      <span>Version 1.7.10</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -2602,7 +2602,7 @@
             const effectiveSwath = lineSpacingModeEl.value === 'swath' ? computeSwathWidthMetres() : spacing;
             const context = surveyGridContext(selected.sourceData, bearing);
             estimate = optimizeSurveyOffset(context, spacing, effectiveSwath, speed, turnTime, overshootMeters);
-          } else if (animated) {
+          } else {
             const geometry = generateSurveyGeometry(selected.sourceData, spacing, bearing, {overshootMeters});
             const turns = Math.max(0, geometry.segmentCount - 1);
             estimate = {totalMeters:geometry.totalMeters,segmentCount:geometry.segmentCount,turns,
@@ -3353,7 +3353,7 @@
           optimization = optimizeSurveyOffset(context, spacing, effectiveSwath, speedKnots, turnMinutes, overshootMeters);
           result = generateSurveyGeometry(record.sourceData, spacing, bearing,
             { context, phase: optimization.phase, overshootMeters });
-        } else if (animated) {
+        } else {
           result = generateSurveyGeometry(record.sourceData, spacing, bearing, {overshootMeters});
         }
         // Preserve the original polygon and optional beam angles for later coverage analysis.
@@ -4071,7 +4071,7 @@
         let ring;
         if (drawing.method === 'freehand') {
           ring = drawing.corners.map(p => [p.lng, p.lat]);
-        } else if (animated) {
+        } else {
           const end = drawing.current || event.latlng;
           const west = Math.min(drawing.start.lng, end.lng), east = Math.max(drawing.start.lng, end.lng);
           const south = Math.min(drawing.start.lat, end.lat), north = Math.max(drawing.start.lat, end.lat);
