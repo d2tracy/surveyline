@@ -372,14 +372,16 @@
     .calc-dialog h2 { color: #17334b; font-size: 21px; letter-spacing: .01em; }
     .calc-description, .calc-status { font-family: "Courier New", Consolas, monospace; text-transform: uppercase; letter-spacing: .06em; }
     .calc-description { margin: 0 0 14px; font-size: 11px; color: #507588; line-height: 1.5; }
-    .calc-visual { border: 1px solid #b9d0db; background: #ffffff; padding: 10px; }
+    .calc-visual { border: 0; background: #ffffff; padding: 0; }
     .calc-visual svg { display: block; width: 100%; height: auto; }
-    .calc-inline-preview { margin: 0 0 16px; min-height: 210px; background: #ffffff; }
+    .calc-inline-preview { margin: 0 0 16px; min-height: 210px; padding: 0; border: 0; background: #ffffff; }
     .calc-inline-preview.is-animating { background: #ffffff; }
     .calc-inline-preview .calc-inline-header { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #17334b; }
     .calc-inline-preview .calc-inline-description { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: #597788; }
     .calc-inline-preview .calc-status { margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: #476b7c; }
     .calc-inline-preview .calc-preview-empty { margin: 0; font-size: 12px; line-height: 1.5; color: #6a8391; padding: 8px 4px; }
+    .orientation-intro { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: #476b7c; }
+    .orientation-calculate[hidden] { display: none; }
     .calc-status { margin: 12px 0 0; font-size: 11px; color: #507588; line-height: 1.45; }
     /* A CSS transform runs reliably in Chrome even when bathymetry processing is busy.
        The rotating group uses its shape centroid as the pivot; the polygon clips the beam. */
@@ -390,6 +392,14 @@
     .calc-orientation-rotor {
       transform-box: view-box;
       animation: bathTubOrientationSweep 3.05s linear infinite;
+      will-change: transform;
+    }
+    @keyframes bathTubDepthSweep {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(var(--depth-sweep-travel)); }
+    }
+    .calc-depth-sweep {
+      animation: bathTubDepthSweep 3s linear infinite;
       will-change: transform;
     }
 
@@ -408,7 +418,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.10</span>
+      <span>Version 1.7.11</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -714,8 +724,9 @@
         <h2 id="orientationDialogTitle">BathTub Orientation Finder Tool</h2>
         <button id="closeOrientationFinder" class="survey-close" type="button" aria-label="Close Orientation Finder">×</button>
       </div>
+      <p class="orientation-intro">The tool samples your bathymetry raster across nine regions of the selected survey area, calculates their mean downhill slope directions, and suggests a survey-line orientation perpendicular to the overall downhill direction.</p>
       <div id="orientationSource" class="orientation-source" role="status"></div>
-      <div id="orientationPreview" class="orientation-preview" role="img" aria-label="Survey polygon with downhill slope arrows in zones containing valid bathymetry"></div>
+      <div id="orientationPreview" class="orientation-preview calc-inline-preview" role="img" aria-label="Survey polygon with downhill slope arrows in zones containing valid bathymetry"></div>
       <p id="orientationStatus" class="orientation-status" role="status" aria-live="polite"></p>
       <div id="orientationSummary" class="orientation-summary" hidden>
         <div class="orientation-stat-row"><span>Mean downhill direction</span><strong id="orientationMeanDirection">—</strong></div>
@@ -724,6 +735,7 @@
       </div>
       <button id="showSuggestedOrientationOnShape" class="orientation-outline-button" type="button" hidden>Show suggested line orientation on shape</button>
       <button id="applySuggestedOrientation" class="orientation-suggestion" type="button" hidden>Use suggested line orientation</button>
+      <button id="calculateOrientation" class="survey-draw orientation-calculate" type="button">Calculate</button>
       <p id="orientationFootnote" class="depth-warning">The suggested line orientation is perpendicular to mean downhill direction. Slope is calculated from the raster marked as bathymetry by the user. This tool is not recommended for highly irregular survey area shapes.</p>
     </section>
   </div>
@@ -1052,6 +1064,7 @@
     const orientationSourceEl = document.getElementById('orientationSource');
     const orientationPreviewEl = document.getElementById('orientationPreview');
     const orientationStatusEl = document.getElementById('orientationStatus');
+    const calculateOrientationBtn = document.getElementById('calculateOrientation');
     const orientationSummaryEl = document.getElementById('orientationSummary');
     const orientationMeanDirectionEl = document.getElementById('orientationMeanDirection');
     const orientationMeanSlopeEl = document.getElementById('orientationMeanSlope');
@@ -1829,15 +1842,15 @@
       };
     }
 
+    let nextCalculationClipId = 0;
     function renderCalculationAnimation(sourceData, mode, animated = true) {
+      const clipId = `bathTubCalcAreaClip${++nextCalculationClipId}`;
       const fallbackSvg = animated ? `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 250" role="img" aria-label="BathTub calculating animation">
-          <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
           <path d="M90 180 L118 72 L268 54 L286 177 L196 205 Z" fill="#dcebf2" stroke="#2777a6" stroke-width="2"/>
           <g opacity=".9"><line x1="78" x2="292" y1="124" y2="124" stroke="#ee9854" stroke-width="2"><animate attributeName="y1" values="75;175;75" dur="2.8s" repeatCount="indefinite"/><animate attributeName="y2" values="75;175;75" dur="2.8s" repeatCount="indefinite"/></line></g>
         </svg>` : `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 250" role="img" aria-label="BathTub survey area preview">
-          <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
           <path d="M90 180 L118 72 L268 54 L286 177 L196 205 Z" fill="#dcebf2" stroke="#2777a6" stroke-width="2"/>
         </svg>`;
       try {
@@ -1866,29 +1879,18 @@
         const right = (Math.max(...points.map(p => sx(p[0]))) + 8).toFixed(3);
         const top = (Math.min(...points.map(p => sy(p[1]))) - 6).toFixed(3);
         const bottom = (Math.max(...points.map(p => sy(p[1]))) + 6).toFixed(3);
-        const grid = Array.from({ length: 10 }, (_, i) => {
-          const x = 22 + i * 32;
-          return `<line x1="${x}" y1="18" x2="${x}" y2="232" stroke="#dae8ef" stroke-width="1" opacity=".45"/>`;
-        }).join('') + Array.from({ length: 7 }, (_, i) => {
-          const y = 22 + i * 30;
-          return `<line x1="18" y1="${y}" x2="342" y2="${y}" stroke="#dae8ef" stroke-width="1" opacity=".35"/>`;
-        }).join('');
         let animatedInterior = '';
         if (animated && mode === 'depth') {
-          animatedInterior = `<g clip-path="url(#calcAreaClip)">
-            <rect x="18" y="18" width="324" height="214" fill="none" stroke="#e7f1f5" stroke-width="0"/>
-            <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#ee9854" stroke-width="2.6" opacity=".95">
-              <animate attributeName="y1" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
-              <animate attributeName="y2" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
-            </line>
-            <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#f4b783" stroke-width="7" opacity=".12">
-              <animate attributeName="y1" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
-              <animate attributeName="y2" values="${top};${bottom};${top}" dur="3s" repeatCount="indefinite"/>
-            </line>
+          const sweepTravel = (Number(bottom) - Number(top)).toFixed(3);
+          animatedInterior = `<g clip-path="url(#${clipId})">
+            <g class="calc-depth-sweep" style="--depth-sweep-travel: ${sweepTravel}px">
+              <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#f4b783" stroke-width="7" opacity=".12"/>
+              <line x1="${left}" x2="${right}" y1="${top}" y2="${top}" stroke="#ee9854" stroke-width="2.6" opacity=".95"/>
+            </g>
           </g>`;
         } else if (animated && mode === 'orientation') {
           const radius = Math.max(width, height) * .36;
-          animatedInterior = `<g clip-path="url(#calcAreaClip)">
+          animatedInterior = `<g clip-path="url(#${clipId})">
             <g class="calc-orientation-rotor" style="transform-origin: ${cx}px ${cy}px">
               <line x1="${(Number(cx) - radius).toFixed(3)}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#ee9854" stroke-width="2.8" stroke-linecap="round"/>
               <line x1="${cx}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#f4b783" stroke-width="7" stroke-linecap="round" opacity=".08"/>
@@ -1905,7 +1907,7 @@
           const spread = Math.max(1, maxProj - minProj);
           const lineCount = 12;
           const diagonal = Math.hypot(x1 - x0, y1 - y0) * 1.4;
-          animatedInterior = `<g clip-path="url(#calcAreaClip)">` + Array.from({ length: lineCount }, (_, i) => {
+          animatedInterior = `<g clip-path="url(#${clipId})">` + Array.from({ length: lineCount }, (_, i) => {
             const offset = minProj + spread * ((i + 0.7) / lineCount);
             const px = nxLine * offset;
             const py = nyLine * offset;
@@ -1916,9 +1918,7 @@
           }).join('') + `</g>`;
         }
         return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${animated ? 'BathTub calculating animation' : 'BathTub survey area preview'}">
-          <defs><clipPath id="calcAreaClip"><path d="${pathData}" fill-rule="evenodd"/></clipPath></defs>
-          <rect x="18" y="18" width="324" height="214" fill="#ffffff" stroke="#cbdfe8" stroke-width="1"/>
-          ${grid}
+          <defs><clipPath id="${clipId}" clipPathUnits="userSpaceOnUse"><path d="${pathData}" clip-rule="evenodd"/></clipPath></defs>
           ${outline}
           ${animatedInterior}
         </svg>`;
@@ -1998,25 +1998,28 @@
       lastOrientationAnalysis=null;
       if (restoreFocus && !surveyModal.hidden) orientationFinderBtn.focus();
     }
-    orientationFinderBtn.addEventListener('click', async () => {
-      const request=++orientationFinderToken;
-      const area=selectedSurveyAreaRecord();
-      const raster=activeBathymetryLayer();
+    orientationFinderBtn.addEventListener('click', () => {
+      ++orientationFinderToken;
+      const area = selectedSurveyAreaRecord();
+      const raster = activeBathymetryLayer();
       setStaticCalculationPreview(
         orientationPreviewEl,
         validSurveyArea(area) ? area.sourceData : null,
         'orientation',
         'Select a survey-area polygon to preview it here.'
       );
-      orientationSummaryEl.hidden=true;
-      applySuggestedOrientationBtn.hidden=true;
-      showSuggestedOrientationBtn.hidden=true;
-      pendingSuggestedOrientation=null;
-      showSuggestedOrientationGuide=false;
-      lastOrientationAnalysis=null;
+      orientationSummaryEl.hidden = true;
+      applySuggestedOrientationBtn.hidden = true;
+      showSuggestedOrientationBtn.hidden = true;
+      pendingSuggestedOrientation = null;
+      showSuggestedOrientationGuide = false;
+      lastOrientationAnalysis = null;
       orientationStatusEl.classList.remove('error');
-      orientationStatusEl.hidden=false;
-      orientationModal.hidden=false;
+      orientationStatusEl.hidden = true;
+      orientationStatusEl.textContent = '';
+      calculateOrientationBtn.disabled = false;
+      calculateOrientationBtn.textContent = 'Calculate';
+      orientationModal.hidden = false;
       closeOrientationFinderBtn.focus();
       // Keep data names as ordinary text while emphasizing only the field labels.
       orientationSourceEl.replaceChildren();
@@ -2030,48 +2033,80 @@
         if (addSeparator) orientationSourceEl.append(document.createTextNode(' · '));
       }
       if (!validSurveyArea(area) || !raster) {
-        orientationStatusEl.textContent='Select a polygon as your Survey Area and mark a single-band TIFF as Bathymetry under Imported Layers, then try again.';
-        return;
+        calculateOrientationBtn.disabled = true;
+        orientationStatusEl.hidden = false;
+        orientationStatusEl.textContent = 'Select a survey-area polygon and a bathymetry GeoTIFF, then open the tool again.';
+      } else if (raster.rec.rasterConfig.georaster.numberOfRasters !== 1) {
+        calculateOrientationBtn.disabled = true;
+        orientationStatusEl.hidden = false;
+        orientationStatusEl.classList.add('error');
+        orientationStatusEl.textContent = 'The selected bathymetry TIFF must have a single numeric band.';
       }
-      if (raster.rec.rasterConfig.georaster.numberOfRasters!==1) {
-        orientationStatusEl.textContent='The selected bathymetry TIFF must have a single numeric band.';
+    });
+
+    calculateOrientationBtn.addEventListener('click', async () => {
+      if (calculateOrientationBtn.disabled) return;
+      const request = ++orientationFinderToken;
+      const area = selectedSurveyAreaRecord();
+      const raster = activeBathymetryLayer();
+      if (!validSurveyArea(area) || !raster || raster.rec.rasterConfig.georaster.numberOfRasters !== 1) {
+        orientationStatusEl.textContent = 'Select a valid survey area and single-band bathymetry TIFF.';
+        orientationStatusEl.hidden = false;
         orientationStatusEl.classList.add('error');
         return;
       }
-      const selectedId=surveyAreaSelect.value, rasterId=raster.id;
-      orientationStatusEl.textContent='Calculating nine regional downhill directions from raster samples…';
-      await new Promise(resolve=>setTimeout(resolve,0));
+      const selectedId = surveyAreaSelect.value, rasterId = raster.id;
+      calculateOrientationBtn.disabled = true;
+      calculateOrientationBtn.textContent = 'Calculating…';
+      orientationSummaryEl.hidden = true;
+      applySuggestedOrientationBtn.hidden = true;
+      showSuggestedOrientationBtn.hidden = true;
+      orientationStatusEl.classList.remove('error');
+      orientationStatusEl.hidden = true;
+      pendingSuggestedOrientation = null;
+      showSuggestedOrientationGuide = false;
+      lastOrientationAnalysis = null;
       try {
-        const analysis=await withCalculationAnimation('orientation', area.sourceData, () =>
+        const analysis = await withCalculationAnimation('orientation', area.sourceData, () =>
           calculateOrientationZones(area.sourceData,raster.rec.rasterConfig.georaster),
           orientationPreviewEl
         );
-        if (request!==orientationFinderToken || orientationModal.hidden) return;
-        if (surveyAreaSelect.value!==selectedId || activeBathymetryLayer()?.id!==rasterId)
+        if (request !== orientationFinderToken || orientationModal.hidden) return;
+        if (surveyAreaSelect.value !== selectedId || activeBathymetryLayer()?.id !== rasterId)
           throw new Error('The selected survey area or bathymetry changed during calculation. Open the tool again.');
         lastOrientationAnalysis = analysis;
-        const summary=summarizeOrientationArrows(analysis);
-        renderOrientationPreview(analysis, summary.suggested, showSuggestedOrientationGuide);
-        // The preview and summary communicate results; omit the verbose status line.
-        orientationStatusEl.textContent='';
-        orientationStatusEl.hidden=true;
-        if(summary.count){
-          orientationSummaryEl.hidden=false;
-          orientationMeanDirectionEl.textContent=summary.direction===null
+        const summary = summarizeOrientationArrows(analysis);
+        renderOrientationPreview(analysis, summary.suggested, false);
+        orientationStatusEl.textContent = '';
+        orientationStatusEl.hidden = true;
+        if (summary.count) {
+          orientationSummaryEl.hidden = false;
+          orientationMeanDirectionEl.textContent = summary.direction === null
             ? 'Inconsistent directions' : `${summary.direction.toFixed(1)}°`;
-          orientationMeanSlopeEl.textContent=`${summary.slope.toFixed(2)}° (${(Math.tan(summary.slope*Math.PI/180)*100).toFixed(2)}% gradient)`;
-          if(summary.suggested!==null){
-            pendingSuggestedOrientation=summary.suggested;
-            applySuggestedOrientationBtn.hidden=false;
-            showSuggestedOrientationBtn.hidden=false;
-            showSuggestedOrientationBtn.textContent = showSuggestedOrientationGuide ? 'Hide suggested line orientation on shape' : 'Show suggested line orientation on shape';
-            applySuggestedOrientationBtn.textContent=`Use suggested line orientation: ${summary.suggested.toFixed(1)}°`;
+          orientationMeanSlopeEl.textContent = `${summary.slope.toFixed(2)}° (${(Math.tan(summary.slope*Math.PI/180)*100).toFixed(2)}% gradient)`;
+          if (summary.suggested !== null) {
+            pendingSuggestedOrientation = summary.suggested;
+            applySuggestedOrientationBtn.hidden = false;
+            showSuggestedOrientationBtn.hidden = false;
+            showSuggestedOrientationBtn.textContent = 'Show suggested line orientation on shape';
+            showSuggestedOrientationBtn.setAttribute('aria-pressed', 'false');
+            applySuggestedOrientationBtn.textContent = `Use suggested line orientation: ${summary.suggested.toFixed(1)}°`;
           }
+        } else {
+          orientationStatusEl.hidden = false;
+          orientationStatusEl.textContent = 'No reliable downhill directions were found inside the survey polygon.';
         }
       } catch(error) {
-        if(request!==orientationFinderToken) return;
-        orientationStatusEl.textContent=error.message||'Slope direction calculation failed.';
+        if (request !== orientationFinderToken || orientationModal.hidden) return;
+        setStaticCalculationPreview(orientationPreviewEl, area.sourceData, 'orientation', 'Survey-area preview unavailable.');
+        orientationStatusEl.hidden = false;
+        orientationStatusEl.textContent = error.message || 'Slope direction calculation failed.';
         orientationStatusEl.classList.add('error');
+      } finally {
+        if (request === orientationFinderToken && !orientationModal.hidden) {
+          calculateOrientationBtn.disabled = false;
+          calculateOrientationBtn.textContent = 'Recalculate';
+        }
       }
     });
     applySuggestedOrientationBtn.addEventListener('click',()=>{
@@ -2100,7 +2135,7 @@
     orientationModal.addEventListener('keydown',event=>{
       if(event.key==='Escape') {event.preventDefault();event.stopPropagation();closeOrientationFinder();}
       else if(event.key==='Tab') {
-        const available=[closeOrientationFinderBtn,showSuggestedOrientationBtn,applySuggestedOrientationBtn].filter(el=>!el.hidden&&!el.disabled);
+        const available=[closeOrientationFinderBtn,showSuggestedOrientationBtn,applySuggestedOrientationBtn,calculateOrientationBtn].filter(el=>!el.hidden&&!el.disabled);
         const first=available[0],last=available[available.length-1];
         if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
         else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
