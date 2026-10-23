@@ -257,6 +257,16 @@
     #status[hidden] { display: none; }
     #status.error { margin-top: 10px; border-radius: 8px; background: #fff0ee; color: #9a3939; font-size: 12px; line-height: 1.45; padding: 10px; overflow-wrap: anywhere; }
     .import-help { margin: 0 0 14px; }
+    .shp-import-dialog { max-width: 460px; }
+    .shp-import-help, .shp-import-warning { font-size: 12px; color: #587689; line-height: 1.5; margin: 0 0 16px; }
+    .shp-import-file { font-size: 12px; padding: 11px; margin-bottom: 16px; background: #f0f6f9; overflow-wrap: anywhere; }
+    .shp-import-label { display: block; font-weight: 700; margin-bottom: 8px; font-size: 13px; }
+    .shp-import-custom { margin-top: 14px; }
+    .shp-import-custom[hidden] { display: none; }
+    .shp-import-warning { margin: 12px 0 4px; }
+    .shp-import-actions { display: flex; gap: 10px; margin-top: 22px; }
+    .shp-import-actions button { flex: 1; }
+    .shp-import-dialog .survey-dialog-head { margin-bottom: 17px; }
     .survey-action .plan-survey-btn { width: 100%; min-height: 43px; }
     .map-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
     #map { width: 100%; height: 100%; background: #dcebef; }
@@ -367,21 +377,21 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.3</span>
+      <span>Version 1.7.4</span>
     </div>
   </header>
   <div class="shell" id="appShell">
     <aside id="sidebar">
       <h2>Import your data</h2>
       <div class="help import-help">
-        <p><b>Shapefile:</b> ZIP the .shp, .shx, .dbf and .prj files together. The .prj is essential for projected datasets.</p>
+        <p><b>Shapefile:</b> Upload a .shp file directly (geometry only) or a ZIP containing its companion files. Select the correct CRS for a standalone .shp; include .dbf for attributes and .prj for automatic CRS detection.</p>
         <p style="margin-top: 9px"><b>Raster:</b> Upload a georeferenced GeoTIFF. Ordinary TIFF photographs without georeferencing cannot be positioned.</p>
       </div>
       <label class="upload" id="dropZone">
         <span style="font-size: 24px" aria-hidden="true">⇧</span>
         <strong>Choose files or drag them here</strong>
-        <small>Shapefile ZIP · GeoTIFF (.tif / .tiff)<br>GeoJSON</small>
-        <input id="files" type="file" multiple accept=".zip,.tif,.tiff,.geojson,.json">
+        <small>Shapefile (.shp or ZIP) · GeoTIFF (.tif / .tiff)<br>GeoJSON</small>
+        <input id="files" type="file" multiple accept=".shp,.shx,.dbf,.prj,.cpg,.zip,.tif,.tiff,.geojson,.json">
       </label>
       <div id="status" role="status" aria-live="polite" hidden></div>
       <div class="section">
@@ -609,6 +619,37 @@
     </section>
   </div>
  
+  <!-- Standalone SHP files contain geometry but no embedded CRS. Confirm its coordinates before adding it. -->
+  <div class="survey-modal-backdrop" id="standaloneShpModal" hidden>
+    <section class="survey-dialog shp-import-dialog" role="dialog" aria-modal="true" aria-labelledby="standaloneShpTitle" aria-describedby="standaloneShpHelp">
+      <div class="survey-dialog-head">
+        <h2 id="standaloneShpTitle">Import Shapefile</h2>
+        <button id="cancelStandaloneShpX" class="survey-close" type="button" aria-label="Cancel shapefile import">×</button>
+      </div>
+      <p id="standaloneShpHelp" class="shp-import-help">Standalone .shp files contain shape geometry but do not identify their coordinate reference system. Select the CRS used by this file before importing it.</p>
+      <div class="shp-import-file" id="standaloneShpName"></div>
+      <label for="standaloneShpCRS" class="shp-import-label">Coordinate reference system (CRS)</label>
+      <select id="standaloneShpCRS" class="survey-area-select">
+        <option value="4326">WGS84 geographic (EPSG:4326)</option>
+        <option value="2157">Irish Transverse Mercator (EPSG:2157)</option>
+        <option value="29903">Irish Grid (EPSG:29903)</option>
+        <option value="27700">British National Grid (EPSG:27700)</option>
+        <option value="3857">Web Mercator (EPSG:3857)</option>
+        <option value="other">Other EPSG code…</option>
+      </select>
+      <div id="standaloneShpOther" class="shp-import-custom" hidden>
+        <label for="standaloneShpEPSG" class="shp-import-label">EPSG code</label>
+        <input id="standaloneShpEPSG" class="survey-name-input" inputmode="numeric" placeholder="e.g. 32629 for UTM zone 29N">
+      </div>
+      <p id="standaloneShpWarning" class="shp-import-warning">Choose the CRS used in the source file; this does not reassign its coordinates to a new location.</p>
+      <p id="standaloneShpError" class="survey-error" role="alert" hidden></p>
+      <div class="shp-import-actions">
+        <button id="cancelStandaloneShp" class="export-button secondary" type="button">Cancel</button>
+        <button id="confirmStandaloneShp" class="export-button" type="button">Import Shape</button>
+      </div>
+    </section>
+  </div>
+
   <!-- Separate modal above Plan Survey; no data is sent to a server. -->
   <div class="survey-modal-backdrop depth-backdrop" id="depthModal" hidden>
     <section class="survey-dialog depth-dialog" role="dialog" aria-modal="true" aria-labelledby="depthDialogTitle">
@@ -1392,8 +1433,7 @@
       return Boolean(proj4.defs(id));
     }
 
-    async function ensureRasterCRS(georaster) {
-      const code = rasterEPSGCode(georaster);
+    async function ensureEPSGDefinition(code) {
       if (!registerBuiltInRasterCRS(code)) {
         if (!pendingRasterCRS.has(code)) {
           const request = (async () => {
@@ -1417,9 +1457,13 @@
         try { await pendingRasterCRS.get(code); }
         catch (_) {
           pendingRasterCRS.delete(code);
-          throw new Error(`EPSG:${code} is not in the built-in CRS list, and its online definition could not be loaded. Check your connection or reproject this TIFF in QGIS.`);
+          throw new Error(`EPSG:${code} is not in the built-in CRS list, and its online definition could not be loaded. Check your connection or enter a supported EPSG code.`);
         }
       }
+    }
+
+    async function ensureRasterCRS(georaster) {
+      await ensureEPSGDefinition(rasterEPSGCode(georaster));
       return getRasterCRSTransform(georaster);
     }
 
@@ -3913,13 +3957,134 @@
         });
         const bounds = layer.getBounds();
         if (!validBounds(bounds)) {
-          throw new Error('Layer coordinates are outside valid WGS84 longitude/latitude. Check that the ZIP includes a correct .prj file.');
+          throw new Error('Layer coordinates are outside valid WGS84 longitude/latitude. Check the source CRS (EPSG) or the shapefile .prj.');
         }
         const label = dataset.fileName || filename;
         registerLayer(label, 'Vector layer', layer, bounds, null, true, fromShapefile ? 'shapefile' : 'geojson', dataset);
         count++;
       }
       return count;
+    }
+
+    // .shp contains geometry on its own. Companion .shx is unnecessary for sequential
+    // parsing, .dbf supplies attributes, and .prj supplies the CRS when present.
+    const standaloneShpModal = document.getElementById('standaloneShpModal');
+    const standaloneShpName = document.getElementById('standaloneShpName');
+    const standaloneShpCRS = document.getElementById('standaloneShpCRS');
+    const standaloneShpOther = document.getElementById('standaloneShpOther');
+    const standaloneShpEPSG = document.getElementById('standaloneShpEPSG');
+    const standaloneShpError = document.getElementById('standaloneShpError');
+    const standaloneShpWarning = document.getElementById('standaloneShpWarning');
+    const confirmStandaloneShpBtn = document.getElementById('confirmStandaloneShp');
+    const cancelStandaloneShpBtn = document.getElementById('cancelStandaloneShp');
+    const cancelStandaloneShpX = document.getElementById('cancelStandaloneShpX');
+    let standaloneShpResolver = null;
+    let standaloneShpPreviousFocus = null;
+    function updateStandaloneShpCRS() {
+      standaloneShpOther.hidden = standaloneShpCRS.value !== 'other';
+      standaloneShpError.hidden = true;
+    }
+    standaloneShpCRS.addEventListener('change', updateStandaloneShpCRS);
+    function finishStandaloneShpDialog(value) {
+      standaloneShpModal.hidden = true;
+      standaloneShpOther.hidden = true;
+      const done = standaloneShpResolver;
+      standaloneShpResolver = null;
+      if (standaloneShpPreviousFocus?.isConnected) standaloneShpPreviousFocus.focus();
+      standaloneShpPreviousFocus = null;
+      if (done) done(value);
+    }
+    cancelStandaloneShpBtn.addEventListener('click', () => finishStandaloneShpDialog(null));
+    cancelStandaloneShpX.addEventListener('click', () => finishStandaloneShpDialog(null));
+    standaloneShpModal.addEventListener('click', event => {
+      if (event.target === standaloneShpModal) finishStandaloneShpDialog(null);
+    });
+    standaloneShpModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); finishStandaloneShpDialog(null); }
+      else if (event.key === 'Tab') {
+        const controls = [cancelStandaloneShpX, standaloneShpCRS, ...(!standaloneShpOther.hidden ? [standaloneShpEPSG] : []), cancelStandaloneShpBtn, confirmStandaloneShpBtn];
+        if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls[controls.length-1].focus(); }
+        else if (!event.shiftKey && document.activeElement === controls[controls.length-1]) { event.preventDefault(); controls[0].focus(); }
+      }
+    });
+    confirmStandaloneShpBtn.addEventListener('click', async () => {
+      const code = standaloneShpCRS.value === 'other' ? standaloneShpEPSG.value.trim().replace(/^EPSG:/i,'') : standaloneShpCRS.value;
+      if (!/^[0-9]{3,6}$/.test(code)) {
+        standaloneShpError.textContent = 'Enter a valid numeric EPSG code.';
+        standaloneShpError.hidden = false;
+        return;
+      }
+      confirmStandaloneShpBtn.disabled = true;
+      try {
+        await ensureEPSGDefinition(String(Number(code)));
+        finishStandaloneShpDialog(String(Number(code)));
+      } catch (error) {
+        standaloneShpError.textContent = error.message || 'Unable to load that coordinate system.';
+        standaloneShpError.hidden = false;
+      } finally { confirmStandaloneShpBtn.disabled = false; }
+    });
+    function promptForShpCRS(fileName, likelyGeographic) {
+      if (standaloneShpResolver) throw new Error('Complete the previous shapefile import first.');
+      standaloneShpPreviousFocus = document.activeElement;
+      standaloneShpName.textContent = fileName;
+      standaloneShpCRS.value = likelyGeographic ? '4326' : 'other';
+      standaloneShpEPSG.value = '';
+      standaloneShpWarning.textContent = likelyGeographic
+        ? 'These coordinates look like longitude/latitude, but confirm their CRS before importing.'
+        : 'These coordinates are outside longitude/latitude ranges. Select their projected CRS (for example EPSG:2157), rather than WGS84.';
+      standaloneShpError.hidden = true;
+      updateStandaloneShpCRS();
+      standaloneShpModal.hidden = false;
+      cancelStandaloneShpX.focus();
+      return new Promise(resolve => { standaloneShpResolver = resolve; });
+    }
+    function readStandaloneShpBounds(arrayBuffer) {
+      if (arrayBuffer.byteLength < 100) throw new Error('Invalid SHP file: the file header is incomplete.');
+      const header = new DataView(arrayBuffer);
+      if (header.getInt32(0, false) !== 9994 || header.getInt32(28, true) !== 1000)
+        throw new Error('Invalid SHP file header. Select a genuine ESRI .shp geometry file.');
+      const bounds = [36,44,52,60].map(offset => header.getFloat64(offset,true));
+      if (!bounds.every(Number.isFinite) || bounds[0] > bounds[2] || bounds[1] > bounds[3])
+        throw new Error('The shapefile geometry bounds are invalid.');
+      return bounds;
+    }
+    async function addStandaloneShapefile(file, companions = []) {
+      if (!shp || typeof shp.parseShp !== 'function' || typeof shp.combine !== 'function')
+        throw new Error('The shapefile reader did not load. Check your internet connection.');
+      const bytes = await file.arrayBuffer();
+      const [xmin,ymin,xmax,ymax] = readStandaloneShpBounds(bytes);
+      const baseName = file.name.replace(/\.shp$/i,'');
+      const findCompanion = ext => companions.find(candidate => candidate.name.toLowerCase() === `${baseName}.${ext}`.toLowerCase());
+      const prj = findCompanion('prj');
+      const dbf = findCompanion('dbf');
+      const cpg = findCompanion('cpg');
+      let transformation = null, crsLabel;
+      if (prj) {
+        const wkt = (await prj.text()).trim();
+        if (!wkt) throw new Error('The supplied .prj is empty. Upload only .shp to choose its CRS manually.');
+        try {
+          proj4(wkt); // Validate the WKT definition before reading the geometries.
+          // Convert from the WKT-specified source CRS into WGS84 coordinates.
+          transformation = {inverse: xy => proj4(wkt, 'EPSG:4326', xy)};
+          crsLabel = 'from .prj';
+        } catch (_) {
+          throw new Error('Could not interpret the .prj projection. Upload the .shp alone to select its EPSG code manually.');
+        }
+      } else {
+        const likelyGeographic = xmin >= -180 && xmax <= 180 && ymin >= -90 && ymax <= 90;
+        const code = await promptForShpCRS(file.name, likelyGeographic);
+        if (code === null) { setStatus(`Cancelled import of ${file.name}.`); return; }
+        crsLabel = `EPSG:${code}`;
+        if (code !== '4326') transformation = {inverse: xy => proj4(`EPSG:${code}`, 'EPSG:4326', xy)};
+      }
+      const geometries = shp.parseShp(bytes, transformation);
+      if (!geometries.length) throw new Error('The .shp file contains no features.');
+      let properties;
+      if (dbf) properties = shp.parseDbf(await dbf.arrayBuffer(), cpg ? await cpg.text() : undefined);
+      const geojson = shp.combine([geometries, properties]);
+      geojson.fileName = baseName;
+      const count = addGeoJSON(geojson, file.name, true);
+      setStatus(`Loaded ${count} layer${count === 1 ? '' : 's'} from ${file.name} (${crsLabel}).`);
     }
 
     async function addShapefile(file) {
@@ -4195,25 +4360,32 @@
     async function processFiles(fileList) {
       const files = Array.from(fileList);
       if (!files.length) return;
+      const companions = files.filter(file => /\.(shx|dbf|prj|cpg)$/i.test(file.name));
+      const mainFiles = files.filter(file => !/\.(shx|dbf|prj|cpg)$/i.test(file.name));
+      if (!mainFiles.length) {
+        setStatus('Select a .shp file with its optional companions, or upload a shapefile ZIP.', true);
+        return;
+      }
       let errors = 0;
-      for (const file of files) {
+      for (const file of mainFiles) {
         setStatus(`Reading ${file.name}…`);
         try {
           const name = file.name.toLowerCase();
           if (name.endsWith('.zip')) await addShapefile(file);
+          else if (name.endsWith('.shp')) await addStandaloneShapefile(file, companions);
           else if (name.endsWith('.tif') || name.endsWith('.tiff')) await addRaster(file);
           else if (name.endsWith('.geojson') || name.endsWith('.json')) {
             const data = JSON.parse(await file.text());
             addGeoJSON(data, file.name);
             setStatus(`Loaded ${file.name}.`);
-          } else throw new Error('Unsupported file type. Use a shapefile ZIP, GeoTIFF, or GeoJSON.');
+          } else throw new Error('Unsupported file type. Use .shp, shapefile ZIP, GeoTIFF, or GeoJSON.');
         } catch (error) {
           errors++;
           console.error('Import error for ' + file.name, error);
           setStatus(`${file.name}: ${error.message || 'Unknown import error'}`, true);
         }
       }
-      if (!errors && files.length > 1) setStatus(`Successfully loaded ${files.length} file(s).`);
+      if (!errors && mainFiles.length > 1) setStatus(`Successfully loaded ${mainFiles.length} dataset(s).`);
     }
 
     fileInput.addEventListener('change', async event => {
