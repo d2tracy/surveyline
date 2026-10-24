@@ -418,7 +418,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.11</span>
+      <span>Version 1.7.12</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1889,7 +1889,11 @@
             </g>
           </g>`;
         } else if (animated && mode === 'orientation') {
-          const radius = Math.max(width, height) * .36;
+          // Extend each rotating half-line beyond the farthest polygon vertex
+          // from the rotation pivot. A constant SVG-relative radius was too short
+          // for large, elongated or off-centre survey polygons.
+          const radius = Math.max(...points.map(point =>
+            Math.hypot(sx(point[0]) - Number(cx), sy(point[1]) - Number(cy)))) + 10;
           animatedInterior = `<g clip-path="url(#${clipId})">
             <g class="calc-orientation-rotor" style="transform-origin: ${cx}px ${cy}px">
               <line x1="${(Number(cx) - radius).toFixed(3)}" y1="${cy}" x2="${(Number(cx) + radius).toFixed(3)}" y2="${cy}" stroke="#ee9854" stroke-width="2.8" stroke-linecap="round"/>
