@@ -444,7 +444,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.17</span>
+      <span>Version 1.7.18</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -766,10 +766,9 @@
   <div class="survey-modal-backdrop" id="nonPolygonShapefileModal" hidden>
     <section class="survey-dialog" role="alertdialog" aria-modal="true" aria-labelledby="nonPolygonShapefileTitle" aria-describedby="nonPolygonShapefileDescription">
       <div class="survey-dialog-head">
-        <h2 id="nonPolygonShapefileTitle">No polygons found</h2>
+        <h2 id="nonPolygonShapefileTitle" style="overflow-wrap:anywhere">Warning: Shapefile contains no polygons.</h2>
       </div>
-      <p id="nonPolygonShapefileNames" class="depth-source"></p>
-      <p id="nonPolygonShapefileDescription" class="depth-description">This shapefile does not contain any polygon geometry. It has been imported as a map layer, but it cannot be used as a Survey Area in Plan Survey. To plan a survey, import or create a polygon.</p>
+      <p id="nonPolygonShapefileDescription" class="depth-description">This shapefile does not contain any polygon geometry. It can still be viewed in the map display, but it cannot be used as a Survey Area in Plan Survey.</p>
       <button id="acknowledgeNonPolygonShapefile" class="survey-draw" type="button">OK</button>
     </section>
   </div>
@@ -4589,7 +4588,7 @@
     // Import warnings use the same modal layout as the other BathTub tools.
     // Wait for dismissal before opening the next file's dialog.
     const nonPolygonShapefileModal = document.getElementById('nonPolygonShapefileModal');
-    const nonPolygonShapefileNames = document.getElementById('nonPolygonShapefileNames');
+    const nonPolygonShapefileTitle = document.getElementById('nonPolygonShapefileTitle');
     const acknowledgeNonPolygonShapefileBtn = document.getElementById('acknowledgeNonPolygonShapefile');
     let nonPolygonShapefileResolver = null;
     let nonPolygonShapefilePreviousFocus = null;
@@ -4609,7 +4608,9 @@
     function warnNonPolygonShapefile(names) {
       if (!names.length) return Promise.resolve();
       nonPolygonShapefilePreviousFocus = document.activeElement;
-      nonPolygonShapefileNames.textContent = names.join(', ');
+      nonPolygonShapefileTitle.textContent = names.length === 1
+        ? `Warning: Shapefile "${names[0]}" contains no polygons.`
+        : `Warning: Shapefiles ${names.map(name => `"${name}"`).join(', ')} contain no polygons.`;
       nonPolygonShapefileModal.hidden = false;
       acknowledgeNonPolygonShapefileBtn.focus();
       return new Promise(resolve => { nonPolygonShapefileResolver = resolve; });
