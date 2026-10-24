@@ -430,6 +430,21 @@
     }
 
 
+
+    /* SIS-style survey-line context menu and parallel-line wizard. */
+    .survey-line-context { position: fixed; z-index: 2100; min-width: 186px; padding: 4px; background: white; border: 1px solid #b9d0db; box-shadow: 0 5px 20px rgba(7,27,41,.20); }
+    .survey-line-context[hidden] { display: none; }
+    .survey-line-context button { display: block; width: 100%; padding: 10px 11px; border: 0; background: #fff; color: #17334b; font-size: 13px; font-weight: 650; text-align: left; cursor: pointer; }
+    .survey-line-context button:hover, .survey-line-context button:focus-visible { background: #e9f3f7; outline: none; }
+    .parallel-line-dialog { width: min(440px,100%); }
+    .parallel-line-source { margin: -8px 0 17px; color: #5d7b8c; font-size: 12px; overflow-wrap: anywhere; }
+    .parallel-line-field { margin: 16px 0 0; }
+    .parallel-line-field label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .parallel-line-field .survey-input-unit { width: 100%; }
+    .parallel-line-field .survey-parameter-select { width: 100%; }
+    .parallel-line-error { margin-top: 16px; }
+    .parallel-line-dialog .survey-draw { margin-top: 23px; }
+
   </style>
 </head>
 <body>
@@ -444,7 +459,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.18</span>
+      <span>Version 1.7.19</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -899,6 +914,36 @@
         <div class="plan-stats-row total"><dt>Estimated survey time</dt><dd id="planStatsTotal"></dd></div>
       </dl>
       <p class="plan-stats-note">Estimated time = line distance ÷ (speed × 1,852 m/h per knot) + number of turns × turn time. One turn is assumed between consecutive lines; extra transit, deployment and recovery are excluded.</p>
+    </section>
+  </div>
+
+
+  <!-- Right-click menu is positioned beside the map cursor, like SIS. -->
+  <div id="surveyLineContextMenu" class="survey-line-context" role="menu" aria-label="Survey line actions" hidden>
+    <button id="surveyLineAddParallelMenu" type="button" role="menuitem">Add parallel line</button>
+  </div>
+
+  <div class="survey-modal-backdrop" id="parallelLineModal" hidden>
+    <section class="survey-dialog parallel-line-dialog" role="dialog" aria-modal="true" aria-labelledby="parallelLineTitle">
+      <div class="survey-dialog-head">
+        <h2 id="parallelLineTitle">Add Parallel Line</h2>
+        <button id="closeParallelLineModal" class="survey-close" type="button" aria-label="Close Add Parallel Line">×</button>
+      </div>
+      <p id="parallelLineSource" class="parallel-line-source"></p>
+      <p class="depth-description">Create a parallel copy of the selected survey line at a specified perpendicular separation. The new line retains the selected line's length and will belong to the same line plan.</p>
+      <div class="parallel-line-field">
+        <label for="parallelLineSpacing">Line separation (m)</label>
+        <div class="survey-input-unit">
+          <input id="parallelLineSpacing" class="survey-parameter-input" type="number" min="0.001" max="100000" step="any" inputmode="decimal" required>
+          <span>m</span>
+        </div>
+      </div>
+      <div class="parallel-line-field">
+        <label for="parallelLineSide">Direction to add parallel</label>
+        <select id="parallelLineSide" class="survey-parameter-select"></select>
+      </div>
+      <p id="parallelLineError" class="survey-error parallel-line-error" role="alert" hidden></p>
+      <button id="confirmParallelLine" class="survey-draw" type="button">Add parallel line</button>
     </section>
   </div>
 
@@ -2980,10 +3025,195 @@
       setSurveyLineSelected(record, line, !line.selected);
     }
 
+
+    // Parallel lines translate every existing vertex in the survey area's local
+    // metre-based CRS. Keeping all intermediate vertices preserves the original
+    // line shape, its survey length, and any overshoot beyond the polygon.
+    const surveyLineContextMenu = document.getElementById('surveyLineContextMenu');
+    const surveyLineAddParallelMenuBtn = document.getElementById('surveyLineAddParallelMenu');
+    const parallelLineModal = document.getElementById('parallelLineModal');
+    const parallelLineSourceEl = document.getElementById('parallelLineSource');
+    const parallelLineSpacingEl = document.getElementById('parallelLineSpacing');
+    const parallelLineSideEl = document.getElementById('parallelLineSide');
+    const parallelLineErrorEl = document.getElementById('parallelLineError');
+    const confirmParallelLineBtn = document.getElementById('confirmParallelLine');
+    const closeParallelLineModalBtn = document.getElementById('closeParallelLineModal');
+    let activeParallelLine = null;
+    let activeSurveyLineMenu = null;
+
+    function hideSurveyLineContextMenu() {
+      surveyLineContextMenu.hidden = true;
+      activeSurveyLineMenu = null;
+    }
+
+    function getParallelLineGeometry(record, line) {
+      const coords = line.layer.toGeoJSON()?.geometry?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2 || !Array.isArray(coords[0]))
+        throw new Error('The selected survey line must contain at least two coordinates.');
+      if (!record.areaGeojson) throw new Error('This line plan has no coordinate reference for calculating an offset.');
+      const projection = projectedSurveyPolygons(record.areaGeojson).projection;
+      const points = coords.map(point => projection.forward([point[0],point[1]]));
+      const first = points[0], last = points[points.length - 1];
+      const dx = last[0] - first[0], dy = last[1] - first[1];
+      const magnitude = Math.hypot(dx,dy);
+      if (!(magnitude > 0.001)) throw new Error('The selected survey line is too short to determine a parallel direction.');
+      const northSouthLine = Math.abs(dy) >= Math.abs(dx);
+      const sideChoices = northSouthLine ? ['East', 'West'] : ['North', 'South'];
+      const perp = [-dy / magnitude, dx / magnitude];
+      return {projection, points, perp, sideChoices};
+    }
+
+    function openSurveyLineContextMenu(planId, lineId, event) {
+      if (drawing || rulerActive || !parallelLineModal.hidden) return;
+      const record = plannedRecords.get(planId), line = record?.lines.get(lineId);
+      if (!record || !line) return;
+      const original = event.originalEvent;
+      if (original) L.DomEvent.stop(original);
+      setSurveyLineSelected(record, line, true);
+      activeSurveyLineMenu = {planId, lineId};
+      surveyLineContextMenu.hidden = false;
+      const clientX = original?.clientX ?? map.latLngToContainerPoint(event.latlng).x + map.getContainer().getBoundingClientRect().left;
+      const clientY = original?.clientY ?? map.latLngToContainerPoint(event.latlng).y + map.getContainer().getBoundingClientRect().top;
+      const width = surveyLineContextMenu.offsetWidth || 186;
+      const height = surveyLineContextMenu.offsetHeight || 46;
+      surveyLineContextMenu.style.left = `${Math.max(5, Math.min(clientX, window.innerWidth - width - 6))}px`;
+      surveyLineContextMenu.style.top = `${Math.max(5, Math.min(clientY, window.innerHeight - height - 6))}px`;
+      surveyLineAddParallelMenuBtn.focus();
+    }
+
+    function openParallelLineModal() {
+      const source = activeSurveyLineMenu;
+      hideSurveyLineContextMenu();
+      const record = plannedRecords.get(source?.planId);
+      const line = record?.lines.get(source?.lineId);
+      if (!record || !line) return;
+      try {
+        const geometry = getParallelLineGeometry(record, line);
+        activeParallelLine = {planId:record.id, lineId:line.id};
+        parallelLineSourceEl.textContent = `${record.name} · ${line.name}`;
+        parallelLineSpacingEl.value = String(record.spacing);
+        parallelLineSideEl.replaceChildren(...geometry.sideChoices.map(choice => new Option(choice,choice)));
+        parallelLineErrorEl.hidden = true;
+        parallelLineModal.hidden = false;
+        document.body.style.overflow = 'hidden';
+        parallelLineSpacingEl.focus();
+        parallelLineSpacingEl.select();
+      } catch(error) {
+        setStatus(error.message || 'Unable to create a parallel line.', true);
+      }
+    }
+
+    function closeParallelLineModal() {
+      if (parallelLineModal.hidden) return;
+      parallelLineModal.hidden = true;
+      activeParallelLine = null;
+      document.body.style.overflow = '';
+      map.getContainer().focus?.();
+    }
+
+    function addParallelSurveyLine(record, sourceLine, separation, direction) {
+      if (!Number.isFinite(separation) || separation <= 0 || separation > 100000)
+        throw new Error('Enter a valid line separation greater than 0 and no more than 100,000 m.');
+      const geometry = getParallelLineGeometry(record, sourceLine);
+      if (!geometry.sideChoices.includes(direction)) throw new Error('Choose one of the available directions for this line.');
+      const [px,py] = geometry.perp;
+      const major = direction === 'East' || direction === 'West' ? px : py;
+      if (Math.abs(major) < 1e-6) throw new Error('Could not calculate the perpendicular direction for this line.');
+      const wanted = direction === 'East' || direction === 'North' ? 1 : -1;
+      const sign = Math.sign(major) * wanted;
+      const xShift = px * sign * separation, yShift = py * sign * separation;
+      const coordinates = geometry.points.map(([x,y]) => geometry.projection.inverse([x+xShift,y+yShift]));
+      if (!coordinates.every(coord => coord.length >= 2 && coord.every(Number.isFinite)))
+        throw new Error('Unable to convert the new line coordinates to WGS84.');
+      const next = record.nextLineNumber + 1;
+      const lineId = String(next);
+      const name = `Line ${String(next).padStart(3, '0')}`;
+      const feature = {type:'Feature',properties:{line:next, heading_deg:record.bearing,
+        spacing_m:record.spacing, separation_m:separation, parallel_side:direction,
+        parallel_to:sourceLine.id, length_m:sourceLine.lengthMeters},
+        geometry:{type:'LineString',coordinates}};
+      let surveyLayer;
+      L.geoJSON(feature,{pane:'plannedPane',style:normalPlanStyle,
+        onEachFeature(_feature,layer){surveyLayer=layer;}});
+      if (!surveyLayer) throw new Error('Unable to create the new survey line geometry.');
+      surveyLayer.bindTooltip(`${name} · parallel ${separation} m ${direction.toLowerCase()}`);
+      surveyLayer.on('click',()=>toggleSurveyLineSelected(record.id,lineId));
+      surveyLayer.on('contextmenu',event=>openSurveyLineContextMenu(record.id,lineId,event));
+      const row = document.createElement('label');
+      row.className = 'planned-line-row';
+      row.dataset.lineId = lineId;
+      row.innerHTML = '<input type="checkbox" class="planned-line-check"><span class="planned-line-label"></span><span class="planned-line-length"></span>';
+      row.querySelector('input').setAttribute('aria-label',`Highlight ${name}`);
+      row.querySelector('.planned-line-label').textContent = name;
+      row.querySelector('.planned-line-length').textContent = `${Math.round(sourceLine.lengthMeters)} m`;
+      const line = {id:lineId,name,passNumber:next,lengthMeters:sourceLine.lengthMeters,
+        layer:surveyLayer,selected:false,row};
+      record.layer.addLayer(surveyLayer);
+      record.lines.set(lineId,line);
+      record.nextLineNumber = next;
+      record.details.querySelector('.planned-line-list').append(row);
+      record.bounds = record.layer.getBounds();
+      // Coverage maps must be recalculated after geometry changes; leaving an
+      // old coverage TIFF available for export would give misleading results.
+      if (record.coverageLayerId) removeRegisteredLayer(record.coverageLayerId);
+      record.coverageLayerId = null;
+      record.coverage = null;
+      refreshPlanSummary(record);
+      refreshPlanSelection(record);
+      // Show the new line in both the map and the expanded plan list.
+      if (record.layer.hasLayer(surveyLayer) && map.hasLayer(record.layer)) surveyLayer.bringToFront();
+      const expand = record.element.querySelector('.planned-expand');
+      if (expand.getAttribute('aria-expanded') !== 'true') expand.click();
+      setSurveyLineSelected(record,line,true);
+      row.scrollIntoView({block:'nearest'});
+      return line;
+    }
+
+    surveyLineAddParallelMenuBtn.addEventListener('click',openParallelLineModal);
+    confirmParallelLineBtn.addEventListener('click',()=>{
+      const record = plannedRecords.get(activeParallelLine?.planId);
+      const line = record?.lines.get(activeParallelLine?.lineId);
+      if (!record || !line) {closeParallelLineModal();return;}
+      try {
+        addParallelSurveyLine(record,line,Number(parallelLineSpacingEl.value),parallelLineSideEl.value);
+        closeParallelLineModal();
+      } catch (error) {
+        parallelLineErrorEl.textContent = error.message || 'Could not add the parallel line.';
+        parallelLineErrorEl.hidden = false;
+      }
+    });
+    closeParallelLineModalBtn.addEventListener('click',closeParallelLineModal);
+    parallelLineModal.addEventListener('click',event=>{
+      if (event.target===parallelLineModal) closeParallelLineModal();
+    });
+    parallelLineModal.addEventListener('keydown',event=>{
+      if (event.key==='Escape') {event.preventDefault();event.stopPropagation();closeParallelLineModal();}
+      else if (event.key==='Enter' && event.target!==closeParallelLineModalBtn) {
+        event.preventDefault();confirmParallelLineBtn.click();
+      }
+      else if (event.key==='Tab') {
+        const controls=[closeParallelLineModalBtn,parallelLineSpacingEl,parallelLineSideEl,confirmParallelLineBtn];
+        const first=controls[0], last=controls.at(-1);
+        if (event.shiftKey && document.activeElement===first) {event.preventDefault();last.focus();}
+        else if (!event.shiftKey && document.activeElement===last) {event.preventDefault();first.focus();}
+      }
+    });
+    document.addEventListener('pointerdown',event=>{
+      if (!surveyLineContextMenu.hidden && !surveyLineContextMenu.contains(event.target)) hideSurveyLineContextMenu();
+    });
+    document.addEventListener('keydown',event=>{
+      if (event.key==='Escape' && !surveyLineContextMenu.hidden) {
+        event.preventDefault();event.stopPropagation();hideSurveyLineContextMenu();
+      }
+    });
+    map.on('zoomstart movestart',hideSurveyLineContextMenu);
+
     function removeSurveyPlan(id) {
       const record = plannedRecords.get(id);
       if (!record) return;
       if (activePlanStatsId === id) closePlanStatsModal();
+      if (activeParallelLine?.planId === id) closeParallelLineModal();
+      if (activeSurveyLineMenu?.planId === id) hideSurveyLineContextMenu();
       map.removeLayer(record.layer);
       record.element.remove();
       plannedRecords.delete(id);
@@ -2993,6 +3223,7 @@
     function removeSelectedSurveyLines(record) {
       for (const [id, line] of record.lines) {
         if (!line.selected) continue;
+        if (activeSurveyLineMenu?.planId===record.id && activeSurveyLineMenu?.lineId===id) hideSurveyLineContextMenu();
         record.layer.removeLayer(line.layer);
         line.row.remove();
         record.lines.delete(id);
@@ -3407,6 +3638,7 @@
           const lengthMeters = feature.properties.length_m;
           surveyLine.bindTooltip(`${lineName} · ${spacing} m spacing`);
           surveyLine.on('click', () => toggleSurveyLineSelected(id, lineId));
+          surveyLine.on('contextmenu', event => openSurveyLineContextMenu(id, lineId, event));
           lineEntries.set(lineId, { id: lineId, name: lineName,
             passNumber: feature.properties.line, lengthMeters, layer: surveyLine,
             selected: false, row: null });
@@ -3450,7 +3682,7 @@
       }
       const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization, coverage,
         areaGeojson, portAngle, starboardAngle, overshootMeters, coverageLayerId: null,
-        speedKnots, turnMinutes, manualSurveyMinutes, layer, bounds, lines: lineEntries, element: item, details };
+        speedKnots, turnMinutes, manualSurveyMinutes, layer, bounds, lines: lineEntries, nextLineNumber: lineSequence, element: item, details };
       plannedRecords.set(id, record);
       plannedLinesEl.append(item);
       refreshPlanSummary(record);
