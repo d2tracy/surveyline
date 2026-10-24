@@ -445,6 +445,27 @@
     .parallel-line-error { margin-top: 16px; }
     .parallel-line-dialog .survey-draw { margin-top: 23px; }
 
+  
+    /* Crossline planner uses the same squared, clean BathTub controls. */
+    .crossline-open { width: auto; min-width: 190px; margin: 0; }
+    .crossline-preview { min-height: 230px; background: white; padding: 8px; cursor: default; user-select: none; }
+    .crossline-preview.is-drawing { cursor: crosshair; }
+    .crossline-preview svg { display: block; width: 100%; height: auto; }
+    .crossline-overshoot-field { margin-top: 16px; }
+    .crossline-overshoot-field label { margin-bottom: 8px; }
+    .crossline-dialog .survey-draw:disabled { opacity: .48; cursor: not-allowed; }
+    .crossline-confirm { position: fixed; inset: 0; z-index: 2601; display:flex; align-items:center; justify-content:center; background:rgba(6,26,37,.62); padding:20px; }
+    .crossline-confirm[hidden] { display:none; }
+    .crossline-confirm-card { background:white; width:min(340px,100%); border:1px solid #b7d1dd; padding:22px; box-shadow:0 12px 38px rgba(0,0,0,.25); color:#17334b; }
+    .crossline-confirm-card strong { display:block; font-size:17px; margin-bottom:20px; }
+    .crossline-confirm-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .coverage-crossline-choice { display:flex!important; align-items:center; gap:9px; margin:16px 0 0!important; font-size:13px; font-weight:700; cursor:pointer; }
+    .coverage-crossline-choice input { width:16px; height:16px; accent-color:#2777a6; margin:0; }
+    .coverage-crossline-choice:has(input:disabled) { opacity:.55; }
+    .planned-crossline-group { border-top:1px solid #dbe8ee; margin-top:10px; padding-top:9px; }
+    .planned-crossline-group[hidden] { display:none; }
+    .planned-crossline-title { display:block; font-size:12px; font-weight:750; color:#17334b; margin-bottom:7px; }
+
   </style>
 </head>
 <body>
@@ -459,7 +480,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.19</span>
+      <span>Version 1.7.20</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -702,6 +723,11 @@
               </div>
               <p id="surveyOvershootHint" class="optimization-description">Extend both ends of each planned line beyond the survey-area boundary. Default: 0 m. Check obstacles, exclusion zones and safe turning room before operating outside the polygon.</p>
             </div>
+            <div class="survey-field">
+              <label>Crossline planner</label>
+              <button id="openCrosslinePlanner" type="button" class="orientation-outline-button crossline-open" aria-haspopup="dialog" aria-controls="crosslinePlannerModal">Open Crossline Planner</button>
+              <p id="crosslinePlannerStatus" class="optimization-description">Optional: place one crossline perpendicular to the main survey lines.</p>
+            </div>
           </div>
         </details>
       </div>
@@ -842,6 +868,39 @@
     </section>
   </div>
 
+  <!-- Optional crossline is configured before the survey plan is generated. -->
+  <div class="survey-modal-backdrop depth-backdrop" id="crosslinePlannerModal" hidden>
+    <section class="survey-dialog orientation-dialog crossline-dialog" role="dialog" aria-modal="true" aria-labelledby="crosslinePlannerTitle">
+      <div class="survey-dialog-head">
+        <h2 id="crosslinePlannerTitle">Crossline Planner</h2>
+        <button id="closeCrosslinePlanner" class="survey-close" type="button" aria-label="Close Crossline Planner">×</button>
+      </div>
+      <p class="depth-description">Position a crossline perpendicular to your planned survey lines. Select <strong>Draw Crossline</strong>, move your cursor across the survey area, and right-click to confirm its position.</p>
+      <p id="crosslinePlannerSource" class="orientation-source"></p>
+      <div id="crosslinePlannerPreview" class="orientation-preview crossline-preview" aria-label="Survey area and proposed crossline" role="img"></div>
+      <p id="crosslinePlannerMessage" class="survey-hint" role="status">Choose Draw Crossline to position a crossline.</p>
+      <button id="drawCrossline" class="orientation-outline-button" type="button">Draw Crossline</button>
+      <div class="survey-field crossline-overshoot-field">
+        <label for="crosslineOvershoot">Crossline overshoot (m)</label>
+        <div class="survey-input-unit">
+          <input id="crosslineOvershoot" type="number" min="0" max="10000" value="0" step="any" class="survey-parameter-input" inputmode="decimal">
+          <span aria-hidden="true">m</span>
+        </div>
+      </div>
+      <p id="crosslinePlannerError" class="survey-error" role="alert" hidden></p>
+      <button id="setCrossline" class="survey-draw" type="button" disabled>Set Crossline</button>
+    </section>
+    <div id="crosslineConfirm" class="crossline-confirm" hidden>
+      <div class="crossline-confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="crosslineConfirmTitle">
+        <strong id="crosslineConfirmTitle">Place crossline line here?</strong>
+        <div class="crossline-confirm-actions">
+          <button id="crosslineConfirmNo" class="export-button secondary" type="button">No</button>
+          <button id="crosslineConfirmYes" class="export-button" type="button">Yes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Projected swath coverage is a separate workflow for an existing line plan. -->
   <div class="survey-modal-backdrop" id="projectedCoverageModal" hidden>
     <section class="survey-dialog" role="dialog" aria-modal="true" aria-labelledby="projectedCoverageTitle" aria-describedby="projectedCoverageDescription">
@@ -865,6 +924,7 @@
           <input id="coverageStarboardAngle" class="survey-parameter-input" type="number" min="0" max="89.9" step="any" inputmode="decimal" placeholder="From vertical"></div>
       </div>
       <p class="survey-hint">Beam angles are measured outward from vertical. Angles saved with your plan are filled in automatically; otherwise, enter them here.</p>
+      <label class="coverage-crossline-choice" for="coverageIncludeCrossline"><input id="coverageIncludeCrossline" type="checkbox" checked> Include crossline</label>
       <div class="coverage-classes" aria-label="Projected coverage map legend">
         <span><i style="background:#d63237"></i>Red: no coverage</span>
         <span><i style="background:#f6d539"></i>Yellow: one survey line</span>
@@ -2925,6 +2985,47 @@
     }
 
 
+    // Crossline is a constant cross-track coordinate in a metre-based local
+    // projection, with heading perpendicular to the main survey orientation.
+    function crosslineContext(sourceData, bearing) {
+      return surveyGridContext(sourceData, (bearing + 90) % 360);
+    }
+    function crosslineIntervals(context, u) {
+      return mergeSurveySegments(context.shaped.flatMap(poly => lineSegmentsInPolygon(poly, u)));
+    }
+    function buildCrosslineFeatures(sourceData, bearing, u, overshoot) {
+      if (!(Number.isFinite(overshoot) && overshoot >= 0 && overshoot <= 10000))
+        throw new Error('Crossline overshoot must be from 0 to 10,000 metres.');
+      const context = crosslineContext(sourceData, bearing);
+      const intervals = crosslineIntervals(context, u);
+      if (!intervals.length) throw new Error('This crossline does not intersect the survey polygon. Move it inside the area.');
+      const {projection, dx, dy, nx, ny} = context;
+      return intervals.map(([v0, v1], index) => {
+        const start = v0 - overshoot, end = v1 + overshoot;
+        const length = end - start;
+        const divisions = Math.max(1, Math.ceil(length / 75));
+        if (divisions > 20000) throw new Error('The crossline is too long to draw safely.');
+        const coordinates = Array.from({length:divisions + 1}, (_,j) => {
+          const v = start + length * j / divisions;
+          return projection.inverse([u*nx+v*dx,u*ny+v*dy]);
+        });
+        return {type:'Feature', properties:{is_crossline:true,crossline_part:index+1,
+          heading_deg:(bearing+90)%360,overshoot_m:overshoot,length_m:length},
+          geometry:{type:'LineString',coordinates}};
+      });
+    }
+    function appendCrosslineToGeometry(result, selection, area, bearing) {
+      if (!selection) return result;
+      const lines = buildCrosslineFeatures(area, bearing, selection.u, selection.overshoot);
+      for (const feature of lines) {
+        feature.properties.line = result.lineCount + 1;
+        result.geojson.features.push(feature);
+        result.totalMeters += feature.properties.length_m;
+        result.segmentCount++;
+      }
+      return result;
+    }
+
     // Live estimate uses the SAME line geometry, selected placement and
     // time formula used when a plan is actually created. Debounce changes to
     // avoid recomputing geometry on every keystroke.
@@ -2963,6 +3064,14 @@
             estimate = {totalMeters:geometry.totalMeters,segmentCount:geometry.segmentCount,turns,
               minutes: geometry.totalMeters / (speed * 1852) * 60 + turns * turnTime};
           }
+          if (hasMatchingCrossline(surveyAreaSelect.value,bearing)) {
+            const cross=buildCrosslineFeatures(selected.sourceData,bearing,savedCrossline.u,savedCrossline.overshoot);
+            const extraLength=cross.reduce((sum,feature)=>sum+feature.properties.length_m,0);
+            estimate.totalMeters+=extraLength;
+            estimate.segmentCount+=cross.length;
+            estimate.turns=Math.max(0,estimate.segmentCount-1);
+            estimate.minutes+=extraLength/(speed*1852)*60+cross.length*turnTime;
+          }
           if (token !== surveyTimeRefreshToken) return;
           displayedEstimatedMinutes = estimate.minutes;
           displayCalculatedSurveyMinutes(estimate.minutes);
@@ -2994,8 +3103,9 @@
       const lines = Array.from(record.lines.values());
       const passes = new Set(lines.map(line => line.passNumber)).size;
       const totalMeters = lines.reduce((sum, line) => sum + line.lengthMeters, 0);
+      const crossCount=lines.filter(line=>line.isCrossline).length;
       record.details.querySelector('.planned-summary').textContent =
-        `${record.optimization ? 'BathTub Optimized · ' : ''}${passes} passes · ${lines.length} lines · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km${record.overshootMeters > 0 ? ` · ${record.overshootMeters} m overshoot per end` : ''}`;
+        `${record.optimization ? 'BathTub Optimized · ' : ''}${passes} passes · ${lines.length} lines${crossCount ? ` (${crossCount} crossline)` : ''} · ${record.spacing} m · ${record.bearing}° · ${(totalMeters / 1000).toFixed(2)} km${record.overshootMeters > 0 ? ` · ${record.overshootMeters} m overshoot per end` : ''}`;
       record.element.querySelector('.planned-name').title = `${record.name} (${record.sourceName})`;
       if (!planStatsModal.hidden && activePlanStatsId === record.id) refreshPlanStatsPopup();
     }
@@ -3228,12 +3338,18 @@
         line.row.remove();
         record.lines.delete(id);
       }
+      const crossGroup=record.details.querySelector('.planned-crossline-group');
+      if(crossGroup) crossGroup.hidden=!Array.from(record.lines.values()).some(line=>line.isCrossline);
       if (record.lines.size === 0) {
         // Remove the empty plan as well; no invisible zero-line plans remain.
         removeSurveyPlan(record.id);
         return;
       }
       record.bounds = record.layer.getBounds();
+      // Any removed line can change coverage, including a crossline.
+      if (record.coverageLayerId) removeRegisteredLayer(record.coverageLayerId);
+      record.coverageLayerId = null;
+      record.coverage = null;
       refreshPlanSummary(record);
       refreshPlanSelection(record);
     }
@@ -3634,12 +3750,14 @@
         onEachFeature(feature, surveyLine) {
           const sequence = ++lineSequence;
           const lineId = String(sequence);
-          const lineName = `Line ${String(sequence).padStart(3, '0')}`;
+          const isCrossline=Boolean(feature.properties.is_crossline);
+          const lineName = isCrossline ? `Crossline ${String(feature.properties.crossline_part||1).padStart(3,'0')}`
+            : `Line ${String(sequence).padStart(3, '0')}`;
           const lengthMeters = feature.properties.length_m;
           surveyLine.bindTooltip(`${lineName} · ${spacing} m spacing`);
           surveyLine.on('click', () => toggleSurveyLineSelected(id, lineId));
           surveyLine.on('contextmenu', event => openSurveyLineContextMenu(id, lineId, event));
-          lineEntries.set(lineId, { id: lineId, name: lineName,
+          lineEntries.set(lineId, { id: lineId, name: lineName, isCrossline,
             passNumber: feature.properties.line, lengthMeters, layer: surveyLine,
             selected: false, row: null });
         }
@@ -3665,10 +3783,16 @@
             <button type="button" class="planned-delete-selected" disabled>Delete selected</button>
           </div>
           <div class="planned-line-list" role="group" aria-label="Lines in this plan"></div>
+          <div class="planned-crossline-group" hidden>
+            <span class="planned-crossline-title">Crossline</span>
+            <div class="planned-line-list planned-crossline-list" role="group" aria-label="Crossline segments"></div>
+          </div>
         </div>`;
       item.querySelector('.planned-name').textContent = name;
       const details = item.querySelector('.planned-details');
       const lineList = details.querySelector('.planned-line-list');
+      const crosslineGroup=details.querySelector('.planned-crossline-group');
+      const crosslineList=details.querySelector('.planned-crossline-list');
       for (const line of lineEntries.values()) {
         const row = document.createElement('label');
         row.className = 'planned-line-row';
@@ -3678,7 +3802,8 @@
         row.querySelector('.planned-line-label').textContent = line.name;
         row.querySelector('.planned-line-length').textContent = `${Math.round(line.lengthMeters)} m`;
         line.row = row;
-        lineList.append(row);
+        (line.isCrossline ? crosslineList : lineList).append(row);
+        if (line.isCrossline) crosslineGroup.hidden=false;
       }
       const record = { id, name, sourceName, spacing, bearing: bearingDegrees, optimization, coverage,
         areaGeojson, portAngle, starboardAngle, overshootMeters, coverageLayerId: null,
@@ -3731,6 +3856,9 @@
         ? 'No bathymetry GeoTIFF selected. Set a raster’s type to Bathymetry in Imported Layers.'
         : `Bathymetry: ${bathy.rec.name}${bathy.rec.rasterConfig.georaster.numberOfRasters !== 1 ? ' (must be single-band)' : ''}`;
       coverageRasterSource.textContent = message;
+      const hasCrossline = Boolean(plan && Array.from(plan.lines.values()).some(line=>line.isCrossline));
+      coverageCrosslineCheckbox.disabled=!hasCrossline;
+      coverageCrosslineCheckbox.checked=hasCrossline;
       calculateProjectedCoverageBtn.disabled = !plan || !bathy;
       projectedCoverageError.hidden = true;
       updateCoveragePreview();
@@ -3797,7 +3925,9 @@
       const originalText = calculateProjectedCoverageBtn.textContent;
       calculateProjectedCoverageBtn.textContent = 'Calculating…';
       try {
-        const currentLines = Array.from(plan.lines.values()).map(line => line.layer.toGeoJSON());
+        const currentLines = Array.from(plan.lines.values())
+          .filter(line=>coverageCrosslineCheckbox.checked || !line.isCrossline)
+          .map(line => line.layer.toGeoJSON());
         if (!currentLines.length) throw new Error('The selected line plan has no survey lines.');
         await new Promise(resolve => setTimeout(resolve,0));
         const coverage = await withCalculationAnimation('coverage', plan.areaGeojson, () =>
@@ -3838,6 +3968,181 @@
         updateCoverageSelection();
       }
     });
+
+    // Crossline Planner state is scoped to the currently selected polygon and
+    // main-line orientation. Right-click confirms the red dashed preview.
+    const crosslinePlannerModal = document.getElementById('crosslinePlannerModal');
+    const crosslinePreviewEl = document.getElementById('crosslinePlannerPreview');
+    const crosslineSourceEl = document.getElementById('crosslinePlannerSource');
+    const crosslineMessageEl = document.getElementById('crosslinePlannerMessage');
+    const crosslineErrorEl = document.getElementById('crosslinePlannerError');
+    const crosslineOvershootEl = document.getElementById('crosslineOvershoot');
+    const crosslineConfirmEl = document.getElementById('crosslineConfirm');
+    const setCrosslineBtn = document.getElementById('setCrossline');
+    const drawCrosslineBtn = document.getElementById('drawCrossline');
+    const crosslineStatusEl = document.getElementById('crosslinePlannerStatus');
+    const openCrosslineBtn = document.getElementById('openCrosslinePlanner');
+    const coverageCrosslineCheckbox = document.getElementById('coverageIncludeCrossline');
+    let savedCrossline = null;
+    let crosslineDraft = null;
+
+    function currentCrosslineContext() {
+      const area = selectedSurveyAreaRecord();
+      const bearing = readOptionalNumber(document.getElementById('lineOrientationValue'));
+      if (!validSurveyArea(area)) throw new Error('Choose a polygon Survey Area before opening Crossline Planner.');
+      if (!(bearing >= 0 && bearing < 360)) throw new Error('Enter a valid Line Orientation before planning a crossline.');
+      return {area, bearing, context:crosslineContext(area.sourceData,bearing)};
+    }
+    function hasMatchingCrossline(areaId, bearing) {
+      return savedCrossline && savedCrossline.areaId === areaId && Math.abs(savedCrossline.bearing-bearing)<1e-7;
+    }
+    function updateCrosslineStatus() {
+      const area = selectedSurveyAreaRecord();
+      const bearing = readOptionalNumber(document.getElementById('lineOrientationValue'));
+      crosslineStatusEl.textContent = hasMatchingCrossline(surveyAreaSelect.value,bearing)
+        ? `Crossline set · ${savedCrossline.overshoot} m overshoot per end. Open planner to edit.`
+        : savedCrossline ? 'Survey area or line orientation changed. Reopen planner to set a new crossline.'
+        : 'Optional: place one crossline perpendicular to the main survey lines.';
+    }
+    function crosslinePreviewMarkup(draft) {
+      const all = draft.context.shaped.flat(2);
+      const xy = all.map(pt=>[pt.u*draft.context.nx+pt.v*draft.context.dx,
+        pt.u*draft.context.ny+pt.v*draft.context.dy]);
+      const xmin=Math.min(...xy.map(p=>p[0])), xmax=Math.max(...xy.map(p=>p[0]));
+      const ymin=Math.min(...xy.map(p=>p[1])), ymax=Math.max(...xy.map(p=>p[1]));
+      const width=420,height=300,margin=23;
+      const scale=Math.min((width-2*margin)/Math.max(1,xmax-xmin),(height-2*margin)/Math.max(1,ymax-ymin));
+      const ox=(width-(xmax-xmin)*scale)/2, oy=(height-(ymax-ymin)*scale)/2;
+      const sx=x=>ox+(x-xmin)*scale, sy=y=>oy+(ymax-y)*scale;
+      const path=draft.context.shaped.map(poly=>poly.map(ring=>ring.map((p,i)=>{
+        const x=p.u*draft.context.nx+p.v*draft.context.dx;
+        const y=p.u*draft.context.ny+p.v*draft.context.dy;
+        return `${i?'L':'M'}${sx(x).toFixed(2)} ${sy(y).toFixed(2)}`;
+      }).join(' ')+' Z').join(' ')).join(' ');
+      draft.previewMap = {xmin,xmax,ymin,ymax,width,height,ox,oy,scale};
+      const base = `<path d="${path}" fill="#e7f1f5" fill-rule="evenodd" stroke="#263e4d" stroke-width="1.8"/>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" aria-label="Crossline planner survey area">
+        <defs><clipPath id="crosslineAreaClip"><path d="${path}" fill-rule="evenodd"/></clipPath></defs>
+        ${base}<g id="crosslineGuide" clip-path="url(#crosslineAreaClip)"></g>
+      </svg>`;
+    }
+    function paintCrosslineGuide() {
+      const draft = crosslineDraft;
+      if (!draft || !Number.isFinite(draft.u)) return;
+      const guide = crosslinePreviewEl.querySelector('#crosslineGuide');
+      if (!guide) return;
+      const intervals = crosslineIntervals(draft.context,draft.u);
+      const {xmin,ymax,ox,oy,scale}=draft.previewMap;
+      const segs = intervals.map(([v0,v1])=>{
+        const asXY=v=>[draft.u*draft.context.nx+v*draft.context.dx,
+          draft.u*draft.context.ny+v*draft.context.dy];
+        const a=asXY(v0), b=asXY(v1);
+        const x1=ox+(a[0]-xmin)*scale, y1=oy+(ymax-a[1])*scale;
+        const x2=ox+(b[0]-xmin)*scale, y2=oy+(ymax-b[1])*scale;
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#d63237" stroke-width="3" stroke-dasharray="9 6"/>`;
+      });
+      guide.innerHTML=segs.join('');
+      draft.valid=intervals.length>0;
+    }
+    function crosslinePointFromEvent(event) {
+      const svg=crosslinePreviewEl.querySelector('svg');
+      if (!svg) return null;
+      const bounds=svg.getBoundingClientRect();
+      const p=crosslineDraft.previewMap;
+      const x=p.xmin+((event.clientX-bounds.left)/bounds.width*p.width-p.ox)/p.scale;
+      const y=p.ymax-((event.clientY-bounds.top)/bounds.height*p.height-p.oy)/p.scale;
+      return x*crosslineDraft.context.nx+y*crosslineDraft.context.ny;
+    }
+    function showCrosslineError(message) {
+      crosslineErrorEl.textContent=message;crosslineErrorEl.hidden=false;
+    }
+    function openCrosslinePlanner() {
+      crosslineErrorEl.hidden=true;
+      try {
+        const {area,bearing,context}=currentCrosslineContext();
+        const retained=hasMatchingCrossline(surveyAreaSelect.value,bearing) ? savedCrossline : null;
+        const center=(context.minU+context.maxU)/2;
+        crosslineDraft={areaId:surveyAreaSelect.value,bearing,context,source:area.sourceData,
+          u:retained?.u ?? center,valid:false,drawing:false,confirmed:!!retained,previewMap:null};
+        crosslineSourceEl.textContent=`Survey Area: ${area.name} · Crossline orientation: ${((bearing+90)%360).toFixed(1)}°`;
+        crosslineOvershootEl.value=String(retained?.overshoot ?? 0);
+        crosslinePreviewEl.innerHTML=crosslinePreviewMarkup(crosslineDraft);
+        paintCrosslineGuide();
+        crosslinePreviewEl.classList.remove('is-drawing');
+        crosslineMessageEl.textContent=retained ? 'Existing crossline shown. Choose Draw Crossline to reposition it.'
+          : 'Choose Draw Crossline, move the cursor, and right-click to confirm.';
+        setCrosslineBtn.disabled=!crosslineDraft.confirmed;
+        crosslinePlannerModal.hidden=false;
+        document.body.style.overflow='hidden';
+        drawCrosslineBtn.focus();
+      } catch(error) {
+        surveyErrorEl.textContent=error.message; surveyErrorEl.hidden=false;
+      }
+    }
+    function closeCrosslinePlanner() {
+      crosslineConfirmEl.hidden=true;
+      crosslinePlannerModal.hidden=true;
+      crosslinePreviewEl.classList.remove('is-drawing');
+      crosslineDraft=null;
+      document.body.style.overflow='hidden';
+      openCrosslineBtn.focus();
+    }
+    openCrosslineBtn.addEventListener('click',openCrosslinePlanner);
+    document.getElementById('closeCrosslinePlanner').addEventListener('click',closeCrosslinePlanner);
+    crosslinePlannerModal.addEventListener('click',event=>{
+      if (event.target===crosslinePlannerModal && crosslineConfirmEl.hidden) closeCrosslinePlanner();
+    });
+    drawCrosslineBtn.addEventListener('click',()=>{
+      if (!crosslineDraft) return;
+      crosslineDraft.drawing=true;crosslineDraft.confirmed=false;
+      setCrosslineBtn.disabled=true;
+      crosslinePreviewEl.classList.add('is-drawing');
+      crosslineMessageEl.textContent='Move your mouse over the shape; right-click when the crossline is in position.';
+    });
+    crosslinePreviewEl.addEventListener('mousemove',event=>{
+      if (!crosslineDraft?.drawing || !crosslineConfirmEl.hidden) return;
+      crosslineDraft.u=crosslinePointFromEvent(event);
+      paintCrosslineGuide();
+    });
+    crosslinePreviewEl.addEventListener('contextmenu',event=>{
+      if (!crosslineDraft?.drawing) return;
+      event.preventDefault();event.stopPropagation();
+      if (!crosslineDraft.valid) {showCrosslineError('Move the crossline so that it intersects the survey polygon.');return;}
+      crosslineErrorEl.hidden=true;
+      crosslineConfirmEl.hidden=false;
+      document.getElementById('crosslineConfirmYes').focus();
+    });
+    document.getElementById('crosslineConfirmNo').addEventListener('click',()=>{
+      crosslineConfirmEl.hidden=true;crosslineMessageEl.textContent='Continue moving the crossline; right-click to place it.';
+    });
+    document.getElementById('crosslineConfirmYes').addEventListener('click',()=>{
+      crosslineConfirmEl.hidden=true;
+      crosslineDraft.confirmed=true;crosslineDraft.drawing=false;
+      crosslinePreviewEl.classList.remove('is-drawing');
+      setCrosslineBtn.disabled=false;
+      crosslineMessageEl.textContent='Crossline placed. Set the overshoot, then choose Set Crossline.';
+      setCrosslineBtn.focus();
+    });
+    setCrosslineBtn.addEventListener('click',()=>{
+      if (!crosslineDraft?.confirmed || !crosslineDraft.valid) return;
+      const overshoot=Number(crosslineOvershootEl.value);
+      if (crosslineOvershootEl.value.trim()==='' || !Number.isFinite(overshoot) || overshoot<0 || overshoot>10000) {
+        showCrosslineError('Enter a crossline overshoot from 0 to 10,000 metres.');return;
+      }
+      savedCrossline={areaId:crosslineDraft.areaId,bearing:crosslineDraft.bearing,
+        u:crosslineDraft.u,overshoot};
+      closeCrosslinePlanner();
+      updateCrosslineStatus();
+      scheduleSurveyTimeEstimate();
+    });
+    crosslinePlannerModal.addEventListener('keydown',event=>{
+      if (event.key!=='Escape') return;
+      event.preventDefault();event.stopPropagation();
+      if(!crosslineConfirmEl.hidden) {crosslineConfirmEl.hidden=true;return;}
+      closeCrosslinePlanner();
+    });
+    surveyAreaSelect.addEventListener('change', updateCrosslineStatus);
+    document.getElementById('lineOrientationValue').addEventListener('input',updateCrosslineStatus);
 
     async function drawSurveyLines() {
       surveyErrorEl.hidden = true;
@@ -3900,6 +4205,11 @@
             { context, phase: optimization.phase, overshootMeters });
         } else {
           result = generateSurveyGeometry(record.sourceData, spacing, bearing, {overshootMeters});
+        }
+        if (savedCrossline) {
+          if (!hasMatchingCrossline(surveyAreaSelect.value,bearing))
+            throw new Error('The configured crossline belongs to a different polygon or orientation. Open Crossline Planner to update it.');
+          appendCrosslineToGeometry(result,savedCrossline,record.sourceData,bearing);
         }
         // Preserve the original polygon and optional beam angles for later coverage analysis.
         registerSurveyPlan(record.name, planName, result, spacing, bearing, speedKnots, turnMinutes,
