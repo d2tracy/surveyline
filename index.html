@@ -191,6 +191,13 @@
     .planned-line-length { font-size: 10px; color: #839ba7; margin-left: auto; white-space: nowrap; }
 
 
+    /* TIFF classification on import: same four modes as the layer ⋮ menu. */
+    .raster-import-dialog { width: min(440px,100%); }
+    .raster-import-help { margin: -8px 0 14px; font-size: 13px; line-height: 1.55; }
+    .raster-import-filename { margin: 0 0 17px; padding: 10px 12px; background: #f2f7f9; border: 1px solid #dce8ef; font-size: 12px; overflow-wrap: anywhere; }
+    .raster-import-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+    .raster-import-actions button { border-radius: 0; }
+
     /* Export popup uses the same visual language as Plan Survey. */
     .export-action { padding-top: 12px; }
     .export-action .plan-survey-btn { width: 100%; min-height: 43px; }
@@ -437,7 +444,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.15</span>
+      <span>Version 1.7.16</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -728,6 +735,29 @@
       <div class="shp-import-actions">
         <button id="cancelStandaloneShp" class="export-button secondary" type="button">Cancel</button>
         <button id="confirmStandaloneShp" class="export-button" type="button">Import Shape</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- Prompt after adding each GeoTIFF. Classification can also be changed from the ⋮ menu. -->
+  <div class="survey-modal-backdrop" id="rasterTypeModal" hidden>
+    <section class="survey-dialog raster-import-dialog" role="dialog" aria-modal="true" aria-labelledby="rasterTypeDialogTitle" aria-describedby="rasterTypeDialogHelp">
+      <div class="survey-dialog-head">
+        <h2 id="rasterTypeDialogTitle">Choose GeoTIFF Type</h2>
+        <button id="dismissRasterType" class="survey-close" type="button" aria-label="Keep TIFF type as None">×</button>
+      </div>
+      <p id="rasterTypeDialogHelp" class="raster-import-help">How would you like BathTub to display this GeoTIFF? You can change the type later using the ⋮ button in Imported Layers.</p>
+      <p id="rasterTypeFilename" class="raster-import-filename"></p>
+      <label for="importRasterType">TIFF type</label>
+      <select id="importRasterType" class="survey-area-select">
+        <option value="none">None</option>
+        <option value="bathymetry">Bathymetry</option>
+        <option value="sidescan">Sidescan</option>
+        <option value="backscatter">Backscatter</option>
+      </select>
+      <div class="raster-import-actions">
+        <button id="skipRasterType" class="export-button secondary" type="button">Keep as None</button>
+        <button id="confirmRasterType" class="export-button" type="button">Apply Type</button>
       </div>
     </section>
   </div>
@@ -4474,7 +4504,7 @@
         ${rasterConfig ? `<div class="layer-menu" hidden>
           <label>TIFF type
             <select class="raster-type" aria-label="TIFF type for this raster">
-              <option value="none">None of these</option>
+              <option value="none">None</option>
               <option value="bathymetry">Bathymetry</option>
               <option value="sidescan">Sidescan</option>
               <option value="backscatter">Backscatter</option>
@@ -4780,7 +4810,7 @@
           const gray = Math.round(flip(valueSpan(brightness, limits.low, limits.high)) * 255);
           return `rgb(${gray},${gray},${gray})`;
         }
-        // "None of these": original rendering, without percentile stretch.
+        // "None": original rendering, without percentile stretch.
         if (isRgb) {
           const channels = values.slice(0, 3);
           if (channels.some(v => !isValidPixel(v, nodata))) return null;
@@ -4854,6 +4884,52 @@
       }
     });
 
+
+    // A standalone TIFF has no initial display classification; ask the user
+    // once it has loaded, then apply the *same* type logic as the ⋮ menu.
+    const rasterTypeModal = document.getElementById('rasterTypeModal');
+    const rasterTypeFilename = document.getElementById('rasterTypeFilename');
+    const importRasterType = document.getElementById('importRasterType');
+    const dismissRasterTypeBtn = document.getElementById('dismissRasterType');
+    const skipRasterTypeBtn = document.getElementById('skipRasterType');
+    const confirmRasterTypeBtn = document.getElementById('confirmRasterType');
+    let rasterTypeDialogResolve = null;
+    let rasterTypePreviousFocus = null;
+    function closeRasterTypeDialog(value = null) {
+      if (rasterTypeModal.hidden) return;
+      rasterTypeModal.hidden = true;
+      const done = rasterTypeDialogResolve;
+      rasterTypeDialogResolve = null;
+      if (rasterTypePreviousFocus?.isConnected) rasterTypePreviousFocus.focus();
+      rasterTypePreviousFocus = null;
+      if (done) done(value);
+    }
+    dismissRasterTypeBtn.addEventListener('click', () => closeRasterTypeDialog());
+    skipRasterTypeBtn.addEventListener('click', () => closeRasterTypeDialog());
+    confirmRasterTypeBtn.addEventListener('click', () => closeRasterTypeDialog(importRasterType.value));
+    rasterTypeModal.addEventListener('click', event => {
+      if (event.target === rasterTypeModal) closeRasterTypeDialog();
+    });
+    rasterTypeModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); closeRasterTypeDialog();
+      } else if (event.key === 'Tab') {
+        const controls = [dismissRasterTypeBtn,importRasterType,skipRasterTypeBtn,confirmRasterTypeBtn];
+        const first = controls[0], last = controls[controls.length-1];
+        if (event.shiftKey && document.activeElement === first) {event.preventDefault();last.focus();}
+        else if (!event.shiftKey && document.activeElement === last) {event.preventDefault();first.focus();}
+      }
+    });
+    function promptForRasterType(filename) {
+      if (rasterTypeDialogResolve) throw new Error('Finish choosing the previous TIFF type first.');
+      rasterTypePreviousFocus = document.activeElement;
+      rasterTypeFilename.textContent = filename;
+      importRasterType.value = 'none';
+      rasterTypeModal.hidden = false;
+      importRasterType.focus();
+      return new Promise(resolve => {rasterTypeDialogResolve = resolve;});
+    }
+
     function updateRasterMenu(item, config) {
       const menu = item.querySelector('.layer-menu');
       if (!menu) return;
@@ -4887,6 +4963,30 @@
       updateMapLegend();
     }
 
+    function setRasterDisplayType(id, type) {
+      if (!['none','bathymetry','sidescan','backscatter'].includes(type))
+        throw new Error('Unrecognized TIFF display type.');
+      const rec = records.get(id);
+      const item = Array.from(layersEl.querySelectorAll('.layer')).find(el => el.dataset.id === id);
+      if (!rec?.rasterConfig || !item) throw new Error('The imported raster is no longer available.');
+      // Exactly one imported raster can be marked Bathymetry at a time.
+      if (type === 'bathymetry') {
+        for (const [otherId, otherRec] of records) {
+          if (otherId !== id && otherRec.rasterConfig?.type === 'bathymetry') {
+            otherRec.rasterConfig.type = 'none';
+            const otherItem = Array.from(layersEl.querySelectorAll('.layer'))
+              .find(el => el.dataset.id === otherId);
+            if (otherItem) applyRasterStyle(otherItem, otherRec);
+          }
+        }
+      }
+      rec.rasterConfig.type = type;
+      applyRasterStyle(item, rec);
+      updateDepthSource();
+      const labels = {none:'None',bathymetry:'Bathymetry',sidescan:'Sidescan',backscatter:'Backscatter'};
+      setStatus(`${rec.name}: ${labels[type]} display applied.`);
+    }
+
     async function addRaster(file) {
       if (typeof parseGeoraster !== 'function' || typeof GeoRasterLayer !== 'function') {
         throw new Error('Raster libraries did not load. Check your internet connection.');
@@ -4914,9 +5014,12 @@
       guardRasterTileErrors(layer);
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error(`The raster bounds could not be mapped from EPSG:${rasterCRS.code}. Check the GeoTIFF georeferencing.`);
-      registerLayer(file.name, `Raster · EPSG:${rasterCRS.code}`, layer, bounds, rasterConfig);
-      
-      setStatus(`Loaded georeferenced raster ${file.name}. Use its ⋮ menu to choose a display type.`);
+      const rasterId = registerLayer(file.name, `Raster · EPSG:${rasterCRS.code}`, layer, bounds, rasterConfig);
+      setStatus(`Loaded ${file.name}. Choose its TIFF display type.`);
+      const selectedType = await promptForRasterType(file.name);
+      // Closing the popup keeps the layer imported with type None.
+      if (selectedType !== null) setRasterDisplayType(rasterId, selectedType);
+      else setStatus(`Loaded ${file.name} as None. You can change its type from the ⋮ menu.`);
     }
 
     async function processFiles(fileList) {
@@ -4981,21 +5084,7 @@
         updateCoverageLegend();
         updateMapLegend();
       } else if (event.target.classList.contains('raster-type') && rec.rasterConfig) {
-        // Ensure no more than one TIFF is marked Bathymetry. Newly selected wins.
-        if (event.target.value === 'bathymetry') {
-          for (const [otherId, otherRec] of records) {
-            if (otherId !== item.dataset.id && otherRec.rasterConfig?.type === 'bathymetry') {
-              otherRec.rasterConfig.type = 'none';
-              const otherItem = [...layersEl.querySelectorAll('.layer')].find(el => el.dataset.id === otherId);
-              if (otherItem) applyRasterStyle(otherItem, otherRec);
-            }
-          }
-        }
-        rec.rasterConfig.type = event.target.value;
-        applyRasterStyle(item, rec);
-        updateDepthSource();
-        
-        setStatus(`${rec.name}: ${event.target.selectedOptions[0].textContent} display applied.`);
+        setRasterDisplayType(item.dataset.id, event.target.value);
       }
     });
     for (const layerList of [layersEl,coverageLayersEl]) layerList.addEventListener('click', event => {
