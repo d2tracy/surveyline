@@ -371,9 +371,10 @@
     #surveyModal .survey-dialog { width: min(540px, 100%); }
     .survey-parameters { margin-top: 19px; display: grid; gap: 9px; }
     .survey-accordion { min-width: 0; border: 1px solid #d7e4eb; background: #fff; }
-    .survey-accordion > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; font-size: 14px; font-weight: 750; color: #16354b; background: #f2f7fa; cursor: pointer; list-style: none; user-select: none; }
+    .survey-accordion > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; font-size: 14px; font-weight: 750; color: #ffffff; background: #2777a6; cursor: pointer; list-style: none; user-select: none; }
+    .survey-accordion > summary:hover { background: #17628e; }
     .survey-accordion > summary::-webkit-details-marker { display: none; }
-    .survey-accordion > summary::after { content: '⌄'; color: #2e718c; font-size: 19px; font-weight: 400; transform: rotate(-90deg); transition: transform .14s; }
+    .survey-accordion > summary::after { content: '⌄'; color: #ffffff; font-size: 19px; font-weight: 400; transform: rotate(-90deg); transition: transform .14s; }
     .survey-accordion[open] > summary::after { transform: rotate(0deg); }
     .survey-accordion > summary:focus-visible { outline: 2px solid #2983a1; outline-offset: -2px; }
     .survey-accordion-body { padding: 14px; display: grid; gap: 15px; }
@@ -495,7 +496,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.23</span>
+      <span>Version 1.8</span>
     </div>
   </header>
   <div class="shell" id="appShell">
