@@ -437,7 +437,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.13</span>
+      <span>Version 1.7.14</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -507,15 +507,15 @@
         <div class="legend-values"><span id="legendLeft"></span><span id="legendRight"></span></div>
         <div class="legend-options" id="legendOptions" hidden></div>
       </section>
-      <button id="rulerToggle" class="ruler-toggle" type="button" aria-label="Measure distance" title="Measure distance: left-click points, right-click to finish" aria-pressed="false">
+      <button id="rulerToggle" class="ruler-toggle" type="button" aria-label="Ruler tool" title="Ruler: left-click points, right-click to finish" aria-pressed="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><path d="m3 15 12-12 6 6L9 21l-6-6Z"/><path d="m11 7 3 3m-7 1 3 3m-7 1 3 3"/></svg>
-        Measure
+        Ruler
       </button>
       <section id="rulerReadout" class="ruler-readout" role="status" aria-label="Distance measurement" aria-live="polite" hidden>
         <div class="ruler-readout-head"><span id="rulerState">Measuring distance</span><button id="rulerClear" class="ruler-clear" type="button" title="Clear distance measurement">Clear</button></div>
         <div id="rulerTotal" class="ruler-value">0 m</div>
         <div class="ruler-secondary"><span>Last segment</span><strong id="rulerSegment">0 m</strong></div>
-        <div class="ruler-secondary"><span>Distance (NM)</span><strong id="rulerNautical">0.000 NM</strong></div>
+        <div class="ruler-secondary"><span>Line bearing</span><strong id="rulerBearing">--</strong></div>
         <p id="rulerInstructions" class="ruler-instructions">Left-click to add points. Right-click to finish. Esc to cancel.</p>
       </section>
       </div>
@@ -974,7 +974,7 @@
     const rulerState = document.getElementById('rulerState');
     const rulerTotal = document.getElementById('rulerTotal');
     const rulerSegment = document.getElementById('rulerSegment');
-    const rulerNautical = document.getElementById('rulerNautical');
+    const rulerBearing = document.getElementById('rulerBearing');
     const rulerInstructions = document.getElementById('rulerInstructions');
     const rulerClear = document.getElementById('rulerClear');
     const rulerDock = document.getElementById('mapToolsDock');
@@ -992,6 +992,17 @@
 
     function formatRulerDistance(metres) {
       return metres < 1000 ? `${metres.toFixed(metres < 10 ? 2 : 1)} m` : `${(metres / 1000).toFixed(3)} km`;
+    }
+    // Initial great-circle bearing, clockwise from true north (not grid north).
+    function rulerLineBearing(start, end) {
+      const degToRad = Math.PI / 180;
+      const phi1 = start.lat * degToRad, phi2 = end.lat * degToRad;
+      const deltaLon = (end.lng - start.lng) * degToRad;
+      const east = Math.sin(deltaLon) * Math.cos(phi2);
+      const north = Math.cos(phi1) * Math.sin(phi2) -
+        Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLon);
+      if (Math.hypot(east, north) < 1e-12) return null;
+      return ((Math.atan2(east, north) * 180 / Math.PI) + 360) % 360;
     }
     function ensureRulerLayers() {
       if (!rulerFixedLine) {
@@ -1016,11 +1027,18 @@
       const total = rulerDistance + mouseDist;
       rulerTotal.textContent = formatRulerDistance(total);
       rulerSegment.textContent = formatRulerDistance(mouseDist || segment);
-      rulerNautical.textContent = `${(total / 1852).toFixed(3)} NM`;
+      // A bearing only describes one segment. Include the cursor while placing
+      // the second point; suppress the bearing for a multi-segment route.
+      const singleLine = (rulerPoints.length === 1 && live && rulerCursor)
+        ? [rulerPoints[0], rulerCursor]
+        : (rulerPoints.length === 2 && !(live && rulerCursor))
+          ? [rulerPoints[0], rulerPoints[1]] : null;
+      const bearing = singleLine ? rulerLineBearing(...singleLine) : null;
+      rulerBearing.textContent = bearing === null ? '--' : `${((Math.round(bearing * 10) / 10) % 360).toFixed(1)}°`;
       rulerState.textContent = rulerActive ? 'Measuring distance' : 'Measurement complete';
       rulerInstructions.textContent = rulerActive
         ? 'Left-click to add points. Right-click to finish. Esc to cancel.'
-        : 'Measurement finished. Click Measure to start again, or Clear to remove it.';
+        : 'Measurement finished. Click Ruler to start again, or Clear or Esc to remove it.';
     }
     function setRulerActive(active) {
       rulerActive = active;
@@ -1071,7 +1089,10 @@
       stopRuler(!rulerPoints.length);
     });
     document.addEventListener('keydown', event => {
-      if (event.key !== 'Escape' || !rulerActive) return;
+      if (event.key !== 'Escape' || (!rulerActive && !rulerPoints.length)) return;
+      // Leave Escape to the active dialog, if there is one. Otherwise it clears
+      // both an unfinished ruler and a result already finished by right-click.
+      if (!rulerActive && document.querySelector('.survey-modal-backdrop:not([hidden])')) return;
       event.preventDefault();
       stopRuler(true);
     });
