@@ -110,6 +110,15 @@
     .orientation-outline-button:hover { background: #eef6fa; }
     .orientation-outline-button:disabled { opacity: .55; cursor: not-allowed; }
     .orientation-outline-button[hidden] { display: none !important; }
+    /* The suggested bearing can be refined manually while the example lines remain visible. */
+    .orientation-bearing-field { margin: 12px 0 0; }
+    .orientation-bearing-field[hidden], .orientation-guide-toggle[hidden] { display: none !important; }
+    .orientation-bearing-field label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+    .orientation-bearing-field input[aria-invalid="true"] { border-color: #bd463d; }
+    .orientation-bearing-error { margin: 6px 0 0; color: #ad372d; font-size: 12px; }
+    .orientation-bearing-error[hidden] { display: none; }
+    .orientation-guide-toggle { display: flex; align-items: center; gap: 9px; margin-top: 12px; color: #17334b; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .orientation-guide-toggle input { width: 16px; height: 16px; margin: 0; accent-color: #2777a6; }
     .depth-apply { margin-top: 10px; }
     .depth-apply[hidden] { display: none; }
     .survey-name-field { margin-top: 18px; }
@@ -486,7 +495,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.22</span>
+      <span>Version 1.7.23</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -847,13 +856,24 @@
       <p class="orientation-intro">The tool samples your bathymetry raster across nine regions of the selected survey area, calculates their mean downhill slope directions, and suggests a survey-line orientation perpendicular to the overall downhill direction.</p>
       <div id="orientationSource" class="orientation-source" role="status"></div>
       <div id="orientationPreview" class="orientation-preview calc-inline-preview" role="img" aria-label="Survey polygon with downhill slope arrows in zones containing valid bathymetry"></div>
+      <div id="orientationBearingField" class="survey-field orientation-bearing-field" hidden>
+        <label for="orientationBearingValue">Line bearing (° clockwise from true north)</label>
+        <div class="survey-input-unit">
+          <input id="orientationBearingValue" class="survey-parameter-input" type="number" min="0" max="360" step="any" inputmode="decimal" placeholder="Enter a line bearing">
+          <span>°</span>
+        </div>
+        <p id="orientationBearingError" class="orientation-bearing-error" role="alert" hidden>Enter a bearing between 0° and 360°.</p>
+      </div>
+      <label id="orientationGuideControl" class="orientation-guide-toggle" hidden>
+        <input id="showSuggestedOrientationOnShape" type="checkbox" checked>
+        Show line orientation on shape
+      </label>
       <p id="orientationStatus" class="orientation-status" role="status" aria-live="polite"></p>
       <div id="orientationSummary" class="orientation-summary" hidden>
         <div class="orientation-stat-row"><span>Mean downhill direction</span><strong id="orientationMeanDirection">—</strong></div>
         <div class="orientation-stat-row"><span>Mean slope</span><strong id="orientationMeanSlope">—</strong></div>
         <p class="orientation-summary-hint">Each displayed arrow has equal weight. Directions use a circular mean; slope is the average of each displayed zone’s mean slope angle.</p>
       </div>
-      <button id="showSuggestedOrientationOnShape" class="orientation-outline-button" type="button" hidden>Show suggested line orientation on shape</button>
       <button id="applySuggestedOrientation" class="orientation-suggestion" type="button" hidden>Use suggested line orientation</button>
       <button id="calculateOrientation" class="survey-draw orientation-calculate" type="button">Calculate</button>
       <p id="orientationFootnote" class="depth-warning">The suggested line orientation is perpendicular to mean downhill direction. Slope is calculated from the raster marked as bathymetry by the user. This tool is not recommended for highly irregular survey area shapes.</p>
@@ -1449,6 +1469,11 @@
     const orientationMeanSlopeEl = document.getElementById('orientationMeanSlope');
     const applySuggestedOrientationBtn = document.getElementById('applySuggestedOrientation');
     const showSuggestedOrientationBtn = document.getElementById('showSuggestedOrientationOnShape');
+    const orientationGuideControlEl = document.getElementById('orientationGuideControl');
+    const orientationBearingFieldEl = document.getElementById('orientationBearingField');
+    const orientationBearingValueEl = document.getElementById('orientationBearingValue');
+    const orientationBearingErrorEl = document.getElementById('orientationBearingError');
+    let calculatedSuggestedOrientation = null;
     let orientationFinderToken = 0;
     let pendingSuggestedOrientation = null;
     let showSuggestedOrientationGuide = false;
@@ -2394,8 +2419,11 @@
       orientationFinderToken++;
       orientationModal.hidden=true;
       pendingSuggestedOrientation=null;
+      calculatedSuggestedOrientation=null;
       showSuggestedOrientationGuide=false;
       lastOrientationAnalysis=null;
+      orientationBearingFieldEl.hidden = true;
+      orientationGuideControlEl.hidden = true;
       if (restoreFocus && !surveyModal.hidden) orientationFinderBtn.focus();
     }
     orientationFinderBtn.addEventListener('click', () => {
@@ -2410,8 +2438,14 @@
       );
       orientationSummaryEl.hidden = true;
       applySuggestedOrientationBtn.hidden = true;
-      showSuggestedOrientationBtn.hidden = true;
+      orientationBearingFieldEl.hidden = true;
+      orientationGuideControlEl.hidden = true;
+      orientationBearingErrorEl.hidden = true;
+      orientationBearingValueEl.value = '';
+      orientationBearingValueEl.setAttribute('aria-invalid', 'false');
+      showSuggestedOrientationBtn.checked = true;
       pendingSuggestedOrientation = null;
+      calculatedSuggestedOrientation = null;
       showSuggestedOrientationGuide = false;
       lastOrientationAnalysis = null;
       orientationStatusEl.classList.remove('error');
@@ -2460,10 +2494,14 @@
       calculateOrientationBtn.textContent = 'Calculating…';
       orientationSummaryEl.hidden = true;
       applySuggestedOrientationBtn.hidden = true;
-      showSuggestedOrientationBtn.hidden = true;
+      orientationBearingFieldEl.hidden = true;
+      orientationGuideControlEl.hidden = true;
+      orientationBearingErrorEl.hidden = true;
+      orientationBearingValueEl.setAttribute('aria-invalid', 'false');
       orientationStatusEl.classList.remove('error');
       orientationStatusEl.hidden = true;
       pendingSuggestedOrientation = null;
+      calculatedSuggestedOrientation = null;
       showSuggestedOrientationGuide = false;
       lastOrientationAnalysis = null;
       try {
@@ -2476,7 +2514,7 @@
           throw new Error('The selected survey area or bathymetry changed during calculation. Open the tool again.');
         lastOrientationAnalysis = analysis;
         const summary = summarizeOrientationArrows(analysis);
-        renderOrientationPreview(analysis, summary.suggested, false);
+        renderOrientationPreview(analysis, summary.suggested, summary.suggested !== null);
         orientationStatusEl.textContent = '';
         orientationStatusEl.hidden = true;
         if (summary.count) {
@@ -2485,11 +2523,17 @@
             ? 'Inconsistent directions' : `${summary.direction.toFixed(1)}°`;
           orientationMeanSlopeEl.textContent = `${summary.slope.toFixed(2)}° (${(Math.tan(summary.slope*Math.PI/180)*100).toFixed(2)}% gradient)`;
           if (summary.suggested !== null) {
+            calculatedSuggestedOrientation = summary.suggested;
             pendingSuggestedOrientation = summary.suggested;
+            orientationBearingValueEl.value = String(Number(summary.suggested.toFixed(3)));
+            orientationBearingFieldEl.hidden = false;
+            orientationBearingErrorEl.hidden = true;
+            orientationBearingValueEl.setAttribute('aria-invalid', 'false');
+            showSuggestedOrientationBtn.checked = true;
+            showSuggestedOrientationGuide = true;
+            orientationGuideControlEl.hidden = false;
             applySuggestedOrientationBtn.hidden = false;
-            showSuggestedOrientationBtn.hidden = false;
-            showSuggestedOrientationBtn.textContent = 'Show suggested line orientation on shape';
-            showSuggestedOrientationBtn.setAttribute('aria-pressed', 'false');
+            applySuggestedOrientationBtn.disabled = false;
             applySuggestedOrientationBtn.textContent = `Use suggested line orientation: ${summary.suggested.toFixed(1)}°`;
           }
         } else {
@@ -2519,13 +2563,24 @@
       closeOrientationFinder(false);
       input.focus();
     });
-    showSuggestedOrientationBtn.addEventListener('click',()=>{
+    orientationBearingValueEl.addEventListener('input',()=>{
+      if (!lastOrientationAnalysis || orientationBearingFieldEl.hidden) return;
+      const raw = orientationBearingValueEl.value.trim();
+      const entered = raw === '' ? NaN : Number(raw);
+      const valid = Number.isFinite(entered) && entered >= 0 && entered <= 360;
+      orientationBearingValueEl.setAttribute('aria-invalid', valid ? 'false' : 'true');
+      orientationBearingErrorEl.hidden = valid;
+      applySuggestedOrientationBtn.disabled = !valid;
+      if (!valid) return;
+      pendingSuggestedOrientation = entered === 360 ? 0 : entered;
+      const isSuggested = calculatedSuggestedOrientation !== null &&
+        Math.abs(((pendingSuggestedOrientation - calculatedSuggestedOrientation + 540) % 360) - 180) < 0.0005;
+      applySuggestedOrientationBtn.textContent = `${isSuggested ? 'Use suggested' : 'Use'} line orientation: ${pendingSuggestedOrientation.toFixed(1)}°`;
+      renderOrientationPreview(lastOrientationAnalysis, pendingSuggestedOrientation, showSuggestedOrientationBtn.checked);
+    });
+    showSuggestedOrientationBtn.addEventListener('change',()=>{
+      showSuggestedOrientationGuide = showSuggestedOrientationBtn.checked;
       if (!lastOrientationAnalysis || pendingSuggestedOrientation===null) return;
-      showSuggestedOrientationGuide = !showSuggestedOrientationGuide;
-      showSuggestedOrientationBtn.textContent = showSuggestedOrientationGuide
-        ? 'Hide suggested line orientation on shape'
-        : 'Show suggested line orientation on shape';
-      showSuggestedOrientationBtn.setAttribute('aria-pressed', showSuggestedOrientationGuide ? 'true' : 'false');
       renderOrientationPreview(lastOrientationAnalysis, pendingSuggestedOrientation, showSuggestedOrientationGuide);
     });
     closeOrientationFinderBtn.addEventListener('click',()=>closeOrientationFinder());
@@ -2535,7 +2590,8 @@
     orientationModal.addEventListener('keydown',event=>{
       if(event.key==='Escape') {event.preventDefault();event.stopPropagation();closeOrientationFinder();}
       else if(event.key==='Tab') {
-        const available=[closeOrientationFinderBtn,showSuggestedOrientationBtn,applySuggestedOrientationBtn,calculateOrientationBtn].filter(el=>!el.hidden&&!el.disabled);
+        const available=[closeOrientationFinderBtn,orientationBearingValueEl,showSuggestedOrientationBtn,applySuggestedOrientationBtn,calculateOrientationBtn]
+          .filter(el=>!el.disabled && !el.hidden && !el.closest('[hidden]'));
         const first=available[0],last=available[available.length-1];
         if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
         else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
