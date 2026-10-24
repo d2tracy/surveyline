@@ -450,6 +450,9 @@
     .crossline-open { width: auto; min-width: 190px; margin: 0; }
     .crossline-preview { min-height: 230px; background: white; padding: 8px; cursor: default; user-select: none; }
     .crossline-preview.is-drawing { cursor: crosshair; }
+    .crossline-preview.is-choosing-side { cursor: pointer; }
+    .crossline-orientation-field { margin: 2px 0 14px; }
+    .crossline-orientation-field label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
     .crossline-preview svg { display: block; width: 100%; height: auto; }
     .crossline-overshoot-field { margin-top: 16px; }
     .crossline-overshoot-field label { margin-bottom: 8px; }
@@ -480,7 +483,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.20</span>
+      <span>Version 1.7.21</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -875,8 +878,15 @@
         <h2 id="crosslinePlannerTitle">Crossline Planner</h2>
         <button id="closeCrosslinePlanner" class="survey-close" type="button" aria-label="Close Crossline Planner">×</button>
       </div>
-      <p class="depth-description">Position a crossline perpendicular to your planned survey lines. Select <strong>Draw Crossline</strong>, move your cursor across the survey area, and right-click to confirm its position.</p>
+      <p class="depth-description">Choose a crossline orientation, then position it within your survey area. For a side-parallel crossline, click a polygon edge to choose the reference direction first. Select <strong>Draw Crossline</strong>, move the mouse, and left-click to confirm its position.</p>
       <p id="crosslinePlannerSource" class="orientation-source"></p>
+      <div class="survey-field crossline-orientation-field">
+        <label for="crosslineOrientationMode">Crossline orientation</label>
+        <select id="crosslineOrientationMode" class="survey-area-select">
+          <option value="perpendicular">Perpendicular to survey lines (default)</option>
+          <option value="side">Parallel to shape side</option>
+        </select>
+      </div>
       <div id="crosslinePlannerPreview" class="orientation-preview crossline-preview" aria-label="Survey area and proposed crossline" role="img"></div>
       <p id="crosslinePlannerMessage" class="survey-hint" role="status">Choose Draw Crossline to position a crossline.</p>
       <button id="drawCrossline" class="orientation-outline-button" type="button">Draw Crossline</button>
@@ -915,6 +925,7 @@
           <option value="">Select a line plan…</option>
         </select>
       </div>
+      <label class="coverage-crossline-choice" for="coverageIncludeCrossline"><input id="coverageIncludeCrossline" type="checkbox" checked> Include crossline</label>
       <p id="coverageRasterSource" class="coverage-dialog-source" role="status"></p>
       <div id="coveragePreview" class="orientation-preview calc-inline-preview" role="img" aria-label="Selected line plan survey area preview"></div>
       <div class="coverage-angle-row">
@@ -924,7 +935,6 @@
           <input id="coverageStarboardAngle" class="survey-parameter-input" type="number" min="0" max="89.9" step="any" inputmode="decimal" placeholder="From vertical"></div>
       </div>
       <p class="survey-hint">Beam angles are measured outward from vertical. Angles saved with your plan are filled in automatically; otherwise, enter them here.</p>
-      <label class="coverage-crossline-choice" for="coverageIncludeCrossline"><input id="coverageIncludeCrossline" type="checkbox" checked> Include crossline</label>
       <div class="coverage-classes" aria-label="Projected coverage map legend">
         <span><i style="background:#d63237"></i>Red: no coverage</span>
         <span><i style="background:#f6d539"></i>Yellow: one survey line</span>
@@ -2986,17 +2996,18 @@
 
 
     // Crossline is a constant cross-track coordinate in a metre-based local
-    // projection, with heading perpendicular to the main survey orientation.
-    function crosslineContext(sourceData, bearing) {
-      return surveyGridContext(sourceData, (bearing + 90) % 360);
+    // projection. It defaults to perpendicular to the main line orientation,
+    // or follows a polygon boundary tangent chosen in Crossline Planner.
+    function crosslineContext(sourceData, bearing, orientation = (bearing + 90) % 360) {
+      return surveyGridContext(sourceData, orientation);
     }
     function crosslineIntervals(context, u) {
       return mergeSurveySegments(context.shaped.flatMap(poly => lineSegmentsInPolygon(poly, u)));
     }
-    function buildCrosslineFeatures(sourceData, bearing, u, overshoot) {
+    function buildCrosslineFeatures(sourceData, bearing, u, overshoot, orientation = (bearing + 90) % 360) {
       if (!(Number.isFinite(overshoot) && overshoot >= 0 && overshoot <= 10000))
         throw new Error('Crossline overshoot must be from 0 to 10,000 metres.');
-      const context = crosslineContext(sourceData, bearing);
+      const context = crosslineContext(sourceData, bearing, orientation);
       const intervals = crosslineIntervals(context, u);
       if (!intervals.length) throw new Error('This crossline does not intersect the survey polygon. Move it inside the area.');
       const {projection, dx, dy, nx, ny} = context;
@@ -3010,13 +3021,13 @@
           return projection.inverse([u*nx+v*dx,u*ny+v*dy]);
         });
         return {type:'Feature', properties:{is_crossline:true,crossline_part:index+1,
-          heading_deg:(bearing+90)%360,overshoot_m:overshoot,length_m:length},
+          heading_deg:orientation,overshoot_m:overshoot,length_m:length},
           geometry:{type:'LineString',coordinates}};
       });
     }
     function appendCrosslineToGeometry(result, selection, area, bearing) {
       if (!selection) return result;
-      const lines = buildCrosslineFeatures(area, bearing, selection.u, selection.overshoot);
+      const lines = buildCrosslineFeatures(area, bearing, selection.u, selection.overshoot, selection.orientation);
       for (const feature of lines) {
         feature.properties.line = result.lineCount + 1;
         result.geojson.features.push(feature);
@@ -3065,7 +3076,7 @@
               minutes: geometry.totalMeters / (speed * 1852) * 60 + turns * turnTime};
           }
           if (hasMatchingCrossline(surveyAreaSelect.value,bearing)) {
-            const cross=buildCrosslineFeatures(selected.sourceData,bearing,savedCrossline.u,savedCrossline.overshoot);
+            const cross=buildCrosslineFeatures(selected.sourceData,bearing,savedCrossline.u,savedCrossline.overshoot,savedCrossline.orientation);
             const extraLength=cross.reduce((sum,feature)=>sum+feature.properties.length_m,0);
             estimate.totalMeters+=extraLength;
             estimate.segmentCount+=cross.length;
@@ -3969,14 +3980,15 @@
       }
     });
 
-    // Crossline Planner state is scoped to the currently selected polygon and
-    // main-line orientation. Right-click confirms the red dashed preview.
+    // Crossline Planner state is scoped to the selected polygon and main-line
+    // bearing. Left-click confirms the preview; edge clicks select side bearing.
     const crosslinePlannerModal = document.getElementById('crosslinePlannerModal');
     const crosslinePreviewEl = document.getElementById('crosslinePlannerPreview');
     const crosslineSourceEl = document.getElementById('crosslinePlannerSource');
     const crosslineMessageEl = document.getElementById('crosslinePlannerMessage');
     const crosslineErrorEl = document.getElementById('crosslinePlannerError');
     const crosslineOvershootEl = document.getElementById('crosslineOvershoot');
+    const crosslineOrientationModeEl = document.getElementById('crosslineOrientationMode');
     const crosslineConfirmEl = document.getElementById('crosslineConfirm');
     const setCrosslineBtn = document.getElementById('setCrossline');
     const drawCrosslineBtn = document.getElementById('drawCrossline');
@@ -4000,7 +4012,7 @@
       const area = selectedSurveyAreaRecord();
       const bearing = readOptionalNumber(document.getElementById('lineOrientationValue'));
       crosslineStatusEl.textContent = hasMatchingCrossline(surveyAreaSelect.value,bearing)
-        ? `Crossline set · ${savedCrossline.overshoot} m overshoot per end. Open planner to edit.`
+        ? `Crossline set · ${savedCrossline.mode === 'side' ? 'parallel to selected shape side' : 'perpendicular to survey lines'} · ${savedCrossline.overshoot} m overshoot per end. Open planner to edit.`
         : savedCrossline ? 'Survey area or line orientation changed. Reopen planner to set a new crossline.'
         : 'Optional: place one crossline perpendicular to the main survey lines.';
     }
@@ -4020,10 +4032,26 @@
         return `${i?'L':'M'}${sx(x).toFixed(2)} ${sy(y).toFixed(2)}`;
       }).join(' ')+' Z').join(' ')).join(' ');
       draft.previewMap = {xmin,xmax,ymin,ymax,width,height,ox,oy,scale};
+      // Use the outer rings only; a hole boundary is not the shape's outer side.
+      // Segment selection is calculated in the rendered SVG coordinate system.
+      draft.sideSegments=[];
+      draft.context.shaped.forEach((poly,polygonIndex)=>{
+        const ring=poly[0] || [];
+        for(let i=0;i<ring.length;i++){
+          const p0=ring[i],p1=ring[(i+1)%ring.length];
+          const xy0=[p0.u*draft.context.nx+p0.v*draft.context.dx,p0.u*draft.context.ny+p0.v*draft.context.dy];
+          const xy1=[p1.u*draft.context.nx+p1.v*draft.context.dx,p1.u*draft.context.ny+p1.v*draft.context.dy];
+          const length=Math.hypot(xy1[0]-xy0[0],xy1[1]-xy0[1]);
+          if(length<0.05) continue;
+          draft.sideSegments.push({polygonIndex,index:i, xy0,xy1,
+            a:[sx(xy0[0]),sy(xy0[1])],b:[sx(xy1[0]),sy(xy1[1])]});
+        }
+      });
       const base = `<path d="${path}" fill="#e7f1f5" fill-rule="evenodd" stroke="#263e4d" stroke-width="1.8"/>`;
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" aria-label="Crossline planner survey area">
         <defs><clipPath id="crosslineAreaClip"><path d="${path}" fill-rule="evenodd"/></clipPath></defs>
         ${base}<g id="crosslineGuide" clip-path="url(#crosslineAreaClip)"></g>
+        <g id="crosslineSideHighlight" pointer-events="none"></g>
       </svg>`;
     }
     function paintCrosslineGuide() {
@@ -4053,36 +4081,109 @@
       const y=p.ymax-((event.clientY-bounds.top)/bounds.height*p.height-p.oy)/p.scale;
       return x*crosslineDraft.context.nx+y*crosslineDraft.context.ny;
     }
+    function crosslineSideBearing(draft, side) {
+      const {xy0,xy1}=side;
+      const easting=xy1[0]-xy0[0], northing=xy1[1]-xy0[1];
+      const {convergenceRadians}=projectedSurveyPolygons(draft.source);
+      // surveyGridContext adds grid convergence to true bearings. Undo it
+      // here so the selected edge and resulting line align in that context.
+      return ((Math.atan2(easting,northing)-convergenceRadians)*180/Math.PI+360)%360;
+    }
+    function nearestCrosslineSide(draft, x, y) {
+      let closest=null, distSq=Infinity;
+      for(const side of draft.sideSegments){
+        const [ax,ay]=side.a,[bx,by]=side.b;
+        const vx=bx-ax,vy=by-ay;
+        const fraction=Math.max(0,Math.min(1,((x-ax)*vx+(y-ay)*vy)/(vx*vx+vy*vy)));
+        const d=(x-(ax+fraction*vx))**2+(y-(ay+fraction*vy))**2;
+        if(d<distSq){closest=side;distSq=d;}
+      }
+      return distSq<=13*13 ? closest : null;
+    }
+    function crosslineSVGPoint(event){
+      const svg=crosslinePreviewEl.querySelector('svg');
+      if(!svg) return null;
+      const point=svg.createSVGPoint();
+      point.x=event.clientX;point.y=event.clientY;
+      const matrix=svg.getScreenCTM();
+      return matrix ? point.matrixTransform(matrix.inverse()) : null;
+    }
+    function renderCrosslineSideHighlight(){
+      const target=crosslinePreviewEl.querySelector('#crosslineSideHighlight');
+      if(!target)return;
+      const side=crosslineDraft?.selectedSide;
+      target.innerHTML=side ? `<line x1="${side.a[0]}" y1="${side.a[1]}" x2="${side.b[0]}" y2="${side.b[1]}" stroke="#ee9854" stroke-width="5" stroke-linecap="round"/>` : '';
+    }
     function showCrosslineError(message) {
       crosslineErrorEl.textContent=message;crosslineErrorEl.hidden=false;
+    }
+    function setCrosslineMode(mode, retained=null){
+      const draft=crosslineDraft;
+      if(!draft)return;
+      draft.mode=mode;
+      draft.drawing=false;
+      draft.confirmed=false;
+      draft.selectedSide=null;
+      draft.orientation=null;
+      crosslineErrorEl.hidden=true;
+      crosslinePreviewEl.classList.remove('is-drawing','is-choosing-side');
+      setCrosslineBtn.disabled=true;
+      if(mode==='side') {
+        drawCrosslineBtn.disabled=true;
+        crosslinePreviewEl.classList.add('is-choosing-side');
+        crosslineMessageEl.textContent='Click an outer polygon edge to set the crossline orientation, then choose Draw Crossline.';
+      } else {
+        draft.orientation=(draft.bearing+90)%360;
+        draft.context=crosslineContext(draft.source,draft.bearing,draft.orientation);
+        draft.u=(draft.context.minU+draft.context.maxU)/2;
+        drawCrosslineBtn.disabled=false;
+        crosslineMessageEl.textContent='Choose Draw Crossline, move your cursor, and left-click to confirm.';
+      }
+      // Restore the previous selection when editing an already saved crossline.
+      if(retained && retained.mode===mode){
+        draft.orientation=retained.orientation ?? (draft.bearing+90)%360;
+        draft.context=crosslineContext(draft.source,draft.bearing,draft.orientation);
+        draft.u=retained.u;
+        draft.confirmed=true;
+        drawCrosslineBtn.disabled=false;
+        setCrosslineBtn.disabled=false;
+        crosslineMessageEl.textContent='Existing crossline shown. Choose Draw Crossline to reposition it.';
+      }
+      crosslinePreviewEl.innerHTML=crosslinePreviewMarkup(draft);
+      if(retained?.sideKey && mode==='side'){
+        draft.selectedSide=draft.sideSegments.find(s=>s.polygonIndex===retained.sideKey.polygonIndex && s.index===retained.sideKey.index) || null;
+      }
+      renderCrosslineSideHighlight();
+      if(draft.confirmed && draft.orientation !== null) paintCrosslineGuide();
+      updateCrosslineSourceText();
+    }
+    function updateCrosslineSourceText(){
+      const draft=crosslineDraft;
+      if(!draft)return;
+      crosslineSourceEl.textContent=`Survey Area: ${draft.name} · Crossline orientation: ${draft.orientation===null?'select a shape side':draft.orientation.toFixed(1)+'°'}`;
     }
     function openCrosslinePlanner() {
       crosslineErrorEl.hidden=true;
       try {
         const {area,bearing,context}=currentCrosslineContext();
         const retained=hasMatchingCrossline(surveyAreaSelect.value,bearing) ? savedCrossline : null;
-        const center=(context.minU+context.maxU)/2;
-        crosslineDraft={areaId:surveyAreaSelect.value,bearing,context,source:area.sourceData,
-          u:retained?.u ?? center,valid:false,drawing:false,confirmed:!!retained,previewMap:null};
-        crosslineSourceEl.textContent=`Survey Area: ${area.name} · Crossline orientation: ${((bearing+90)%360).toFixed(1)}°`;
+        crosslineDraft={areaId:surveyAreaSelect.value,name:area.name,bearing,context,source:area.sourceData,
+          u:(context.minU+context.maxU)/2,valid:false,drawing:false,confirmed:false,previewMap:null,
+          mode:'perpendicular',orientation:null,selectedSide:null,sideSegments:[]};
+        crosslineOrientationModeEl.value=retained?.mode==='side' ? 'side':'perpendicular';
         crosslineOvershootEl.value=String(retained?.overshoot ?? 0);
-        crosslinePreviewEl.innerHTML=crosslinePreviewMarkup(crosslineDraft);
-        paintCrosslineGuide();
-        crosslinePreviewEl.classList.remove('is-drawing');
-        crosslineMessageEl.textContent=retained ? 'Existing crossline shown. Choose Draw Crossline to reposition it.'
-          : 'Choose Draw Crossline, move the cursor, and right-click to confirm.';
-        setCrosslineBtn.disabled=!crosslineDraft.confirmed;
+        setCrosslineMode(crosslineOrientationModeEl.value,retained);
         crosslinePlannerModal.hidden=false;
         document.body.style.overflow='hidden';
-        drawCrosslineBtn.focus();
+        (drawCrosslineBtn.disabled ? crosslinePreviewEl : drawCrosslineBtn).focus?.();
       } catch(error) {
-        surveyErrorEl.textContent=error.message; surveyErrorEl.hidden=false;
+        surveyErrorEl.textContent=error.message;surveyErrorEl.hidden=false;
       }
     }
     function closeCrosslinePlanner() {
       crosslineConfirmEl.hidden=true;
       crosslinePlannerModal.hidden=true;
-      crosslinePreviewEl.classList.remove('is-drawing');
+      crosslinePreviewEl.classList.remove('is-drawing','is-choosing-side');
       crosslineDraft=null;
       document.body.style.overflow='hidden';
       openCrosslineBtn.focus();
@@ -4092,28 +4193,53 @@
     crosslinePlannerModal.addEventListener('click',event=>{
       if (event.target===crosslinePlannerModal && crosslineConfirmEl.hidden) closeCrosslinePlanner();
     });
+    crosslineOrientationModeEl.addEventListener('change',()=>setCrosslineMode(crosslineOrientationModeEl.value));
     drawCrosslineBtn.addEventListener('click',()=>{
-      if (!crosslineDraft) return;
+      if(!crosslineDraft || crosslineDraft.orientation===null) return;
       crosslineDraft.drawing=true;crosslineDraft.confirmed=false;
       setCrosslineBtn.disabled=true;
       crosslinePreviewEl.classList.add('is-drawing');
-      crosslineMessageEl.textContent='Move your mouse over the shape; right-click when the crossline is in position.';
+      paintCrosslineGuide();
+      crosslineMessageEl.textContent='Move your mouse over the shape; left-click when the crossline is in position.';
     });
     crosslinePreviewEl.addEventListener('mousemove',event=>{
-      if (!crosslineDraft?.drawing || !crosslineConfirmEl.hidden) return;
+      if(!crosslineDraft?.drawing || !crosslineConfirmEl.hidden)return;
       crosslineDraft.u=crosslinePointFromEvent(event);
       paintCrosslineGuide();
     });
-    crosslinePreviewEl.addEventListener('contextmenu',event=>{
-      if (!crosslineDraft?.drawing) return;
+    crosslinePreviewEl.addEventListener('click',event=>{
+      const draft=crosslineDraft;
+      if(!draft || !crosslineConfirmEl.hidden)return;
+      if(draft.mode==='side' && !draft.drawing && !draft.confirmed) {
+        const pt=crosslineSVGPoint(event);
+        const side=pt && nearestCrosslineSide(draft,pt.x,pt.y);
+        if(!side){crosslineMessageEl.textContent='Click directly on an outer polygon edge to select its direction.';return;}
+        draft.selectedSide=side;
+        draft.orientation=crosslineSideBearing(draft,side);
+        draft.context=crosslineContext(draft.source,draft.bearing,draft.orientation);
+        draft.u=(draft.context.minU+draft.context.maxU)/2;
+        draft.valid=false;
+        renderCrosslineSideHighlight();
+        drawCrosslineBtn.disabled=false;
+        crosslineMessageEl.textContent=`Selected polygon side: ${draft.orientation.toFixed(1)}°. Choose Draw Crossline to position it.`;
+        updateCrosslineSourceText();
+        return;
+      }
+      if(!draft.drawing)return;
       event.preventDefault();event.stopPropagation();
-      if (!crosslineDraft.valid) {showCrosslineError('Move the crossline so that it intersects the survey polygon.');return;}
+      if(!draft.valid){showCrosslineError('Move the crossline so that it intersects the survey polygon.');return;}
       crosslineErrorEl.hidden=true;
       crosslineConfirmEl.hidden=false;
       document.getElementById('crosslineConfirmYes').focus();
     });
+    // Prevent the browser's context menu during placement, but do not use
+    // right-click to finalize: normal GIS-style placement is left-click.
+    crosslinePreviewEl.addEventListener('contextmenu',event=>{
+      if(crosslineDraft?.drawing){event.preventDefault();event.stopPropagation();}
+    });
     document.getElementById('crosslineConfirmNo').addEventListener('click',()=>{
-      crosslineConfirmEl.hidden=true;crosslineMessageEl.textContent='Continue moving the crossline; right-click to place it.';
+      crosslineConfirmEl.hidden=true;
+      crosslineMessageEl.textContent='Continue moving the crossline; left-click to place it.';
     });
     document.getElementById('crosslineConfirmYes').addEventListener('click',()=>{
       crosslineConfirmEl.hidden=true;
@@ -4124,21 +4250,23 @@
       setCrosslineBtn.focus();
     });
     setCrosslineBtn.addEventListener('click',()=>{
-      if (!crosslineDraft?.confirmed || !crosslineDraft.valid) return;
+      if(!crosslineDraft?.confirmed || !crosslineDraft.valid)return;
       const overshoot=Number(crosslineOvershootEl.value);
-      if (crosslineOvershootEl.value.trim()==='' || !Number.isFinite(overshoot) || overshoot<0 || overshoot>10000) {
+      if(crosslineOvershootEl.value.trim()==='' || !Number.isFinite(overshoot) || overshoot<0 || overshoot>10000){
         showCrosslineError('Enter a crossline overshoot from 0 to 10,000 metres.');return;
       }
+      const side=crosslineDraft.selectedSide;
       savedCrossline={areaId:crosslineDraft.areaId,bearing:crosslineDraft.bearing,
-        u:crosslineDraft.u,overshoot};
+        u:crosslineDraft.u,overshoot,mode:crosslineDraft.mode,orientation:crosslineDraft.orientation,
+        sideKey:side?{polygonIndex:side.polygonIndex,index:side.index}:null};
       closeCrosslinePlanner();
       updateCrosslineStatus();
       scheduleSurveyTimeEstimate();
     });
     crosslinePlannerModal.addEventListener('keydown',event=>{
-      if (event.key!=='Escape') return;
+      if(event.key!=='Escape')return;
       event.preventDefault();event.stopPropagation();
-      if(!crosslineConfirmEl.hidden) {crosslineConfirmEl.hidden=true;return;}
+      if(!crosslineConfirmEl.hidden){crosslineConfirmEl.hidden=true;return;}
       closeCrosslinePlanner();
     });
     surveyAreaSelect.addEventListener('change', updateCrosslineStatus);
