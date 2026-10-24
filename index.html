@@ -272,6 +272,24 @@
     #map { width: 100%; height: 100%; background: #dcebef; }
     .map-legend { position: absolute; top: 14px; right: 14px; z-index: 1000; width: 226px; padding: 11px 12px 10px; background: rgba(255,255,255,.96); border: 1px solid #d5e4eb; border-radius: 9px; box-shadow: 0 3px 16px rgba(9,45,66,.15); font-size: 12px; }
     .map-legend[hidden], .legend-options[hidden] { display: none; }
+    /* Right-side map-tools dock: ruler follows the visible bathymetry legend. */
+    .map-tools-dock { position: absolute; top: 14px; right: 14px; z-index: 1000; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+    .map-tools-dock > * { pointer-events: auto; }
+    .map-tools-dock .map-legend { position: relative; top: auto; right: auto; width: 226px; }
+    .ruler-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 10px; min-height: 32px; border: 1px solid #b9d0db; background: rgba(255,255,255,.97); color: #215b77; box-shadow: 0 2px 10px #092d421f; cursor: pointer; font-size: 12px; font-weight: 750; }
+    .ruler-toggle:hover { background: #eef6fa; }
+    .ruler-toggle[aria-pressed="true"] { background: #2777a6; border-color: #2777a6; color: #fff; }
+    .ruler-toggle:focus-visible, .ruler-clear:focus-visible { outline: 2px solid #2983a1; outline-offset: 2px; }
+    .ruler-toggle svg { width: 17px; height: 17px; flex: 0 0 auto; }
+    .ruler-readout { width: 226px; border: 1px solid #bfd4df; background: rgba(255,255,255,.97); padding: 10px 11px; box-shadow: 0 3px 13px #092d421e; color: #17334b; font-size: 12px; }
+    .ruler-readout[hidden] { display: none; }
+    .ruler-readout-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 750; margin: 0 0 8px; }
+    .ruler-clear { padding: 2px 6px; border: 1px solid #c6d9e2; background: #eaf3f7; color: #315e70; cursor: pointer; font-size: 11px; }
+    .ruler-value { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; }
+    .ruler-secondary { display: flex; justify-content: space-between; gap: 8px; color: #537689; padding-top: 5px; font-size: 11px; }
+    .ruler-instructions { color: #5d7d8b; font-size: 11px; line-height: 1.4; margin: 9px 0 0; }
+    #map.measuring-distance { cursor: crosshair !important; }
+    #map.measuring-distance .leaflet-interactive { cursor: crosshair !important; }
     .legend-top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
     .legend-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; }
     .legend-more { padding: 2px 7px; border: 0; border-radius: 5px; background: #eaf3f6; color: #215d74; font-size: 19px; line-height: 1.1; }
@@ -329,7 +347,8 @@
       .shell { display: flex; flex-direction: column; height: calc(100dvh - 60px); min-height: 520px; }
       aside { order: 2; max-height: 47%; padding: 15px; border-right: 0; border-top: 1px solid #dce6eb; }
       .map-stage { order: 1; min-height: 53%; }
-      .map-legend { top: 9px; right: 9px; width: min(212px, 65vw); }
+      .map-tools-dock { top: 9px; right: 9px; }
+      .map-tools-dock .map-legend, .ruler-readout { width: min(212px, 65vw); }
     }
 
     /* Compact, accessible collapsible survey-parameter sections. */
@@ -418,7 +437,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.12</span>
+      <span>Version 1.7.13</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -477,6 +496,7 @@
         <span id="drawingNoticeText"></span>
         <button type="button" id="cancelDrawing" aria-label="Cancel drawing">Cancel (Esc)</button>
       </div>
+      <div class="map-tools-dock" id="mapToolsDock">
       <section class="map-legend" id="mapLegend" aria-label="Raster color legend" hidden>
         <div class="legend-top">
           <span class="legend-name" id="legendName"></span>
@@ -487,6 +507,18 @@
         <div class="legend-values"><span id="legendLeft"></span><span id="legendRight"></span></div>
         <div class="legend-options" id="legendOptions" hidden></div>
       </section>
+      <button id="rulerToggle" class="ruler-toggle" type="button" aria-label="Measure distance" title="Measure distance: left-click points, right-click to finish" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true"><path d="m3 15 12-12 6 6L9 21l-6-6Z"/><path d="m11 7 3 3m-7 1 3 3m-7 1 3 3"/></svg>
+        Measure
+      </button>
+      <section id="rulerReadout" class="ruler-readout" role="status" aria-label="Distance measurement" aria-live="polite" hidden>
+        <div class="ruler-readout-head"><span id="rulerState">Measuring distance</span><button id="rulerClear" class="ruler-clear" type="button" title="Clear distance measurement">Clear</button></div>
+        <div id="rulerTotal" class="ruler-value">0 m</div>
+        <div class="ruler-secondary"><span>Last segment</span><strong id="rulerSegment">0 m</strong></div>
+        <div class="ruler-secondary"><span>Distance (NM)</span><strong id="rulerNautical">0.000 NM</strong></div>
+        <p id="rulerInstructions" class="ruler-instructions">Left-click to add points. Right-click to finish. Esc to cancel.</p>
+      </section>
+      </div>
     </div>
   </div>
 
@@ -925,13 +957,125 @@
     // basemap < imported TIFFs < imported vectors < created polygons < planned lines < coverage.
     for (const [name, index] of [
       ['importedRasterPane',360], ['importedVectorPane',420],
-      ['createdPane',440], ['plannedPane',460], ['coveragePane',490]
+      ['createdPane',440], ['plannedPane',460], ['coveragePane',490], ['measurePane',520]
     ]) {
       const pane = map.createPane(name);
       pane.style.zIndex = String(index);
       // Raster previews should never block survey line interactions underneath.
-      if (name === 'coveragePane' || name === 'importedRasterPane') pane.style.pointerEvents = 'none';
+      if (name === 'coveragePane' || name === 'importedRasterPane' || name === 'measurePane') pane.style.pointerEvents = 'none';
     }
+
+    // --- Map distance ruler ----------------------------------------------------
+    // Distances use Leaflet's geodesic Earth distance between WGS84 positions,
+    // accumulated across every left-click. Right-click finishes without adding
+    // another point; the result remains visible until Clear or a new measurement.
+    const rulerToggle = document.getElementById('rulerToggle');
+    const rulerReadout = document.getElementById('rulerReadout');
+    const rulerState = document.getElementById('rulerState');
+    const rulerTotal = document.getElementById('rulerTotal');
+    const rulerSegment = document.getElementById('rulerSegment');
+    const rulerNautical = document.getElementById('rulerNautical');
+    const rulerInstructions = document.getElementById('rulerInstructions');
+    const rulerClear = document.getElementById('rulerClear');
+    const rulerDock = document.getElementById('mapToolsDock');
+    // Do not allow map clicks on the ruler or raster legend to add waypoints.
+    L.DomEvent.disableClickPropagation(rulerDock);
+    L.DomEvent.disableScrollPropagation(rulerDock);
+    let rulerActive = false;
+    let rulerPoints = [];
+    let rulerCursor = null;
+    let rulerFixedLine = null;
+    let rulerPreviewLine = null;
+    let rulerDots = null;
+    let rulerDistance = 0;
+    const rulerPaint = {pane:'measurePane', interactive:false, color:'#ee9854', weight:3.5, opacity:1};
+
+    function formatRulerDistance(metres) {
+      return metres < 1000 ? `${metres.toFixed(metres < 10 ? 2 : 1)} m` : `${(metres / 1000).toFixed(3)} km`;
+    }
+    function ensureRulerLayers() {
+      if (!rulerFixedLine) {
+        rulerFixedLine = L.polyline([], {...rulerPaint}).addTo(map);
+        rulerPreviewLine = L.polyline([], {...rulerPaint, dashArray:'5 6', opacity:.72}).addTo(map);
+        rulerDots = L.layerGroup().addTo(map);
+      }
+    }
+    function clearRulerGraphics() {
+      rulerPoints = [];
+      rulerCursor = null;
+      rulerDistance = 0;
+      if (rulerFixedLine) rulerFixedLine.setLatLngs([]);
+      if (rulerPreviewLine) rulerPreviewLine.setLatLngs([]);
+      if (rulerDots) rulerDots.clearLayers();
+    }
+    function updateRulerReadout(live = false) {
+      const last = rulerPoints.at(-1);
+      const segment = rulerPoints.length > 1
+        ? map.distance(rulerPoints[rulerPoints.length - 2], last) : 0;
+      const mouseDist = live && last && rulerCursor ? map.distance(last, rulerCursor) : 0;
+      const total = rulerDistance + mouseDist;
+      rulerTotal.textContent = formatRulerDistance(total);
+      rulerSegment.textContent = formatRulerDistance(mouseDist || segment);
+      rulerNautical.textContent = `${(total / 1852).toFixed(3)} NM`;
+      rulerState.textContent = rulerActive ? 'Measuring distance' : 'Measurement complete';
+      rulerInstructions.textContent = rulerActive
+        ? 'Left-click to add points. Right-click to finish. Esc to cancel.'
+        : 'Measurement finished. Click Measure to start again, or Clear to remove it.';
+    }
+    function setRulerActive(active) {
+      rulerActive = active;
+      rulerToggle.setAttribute('aria-pressed', String(active));
+      map.getContainer().classList.toggle('measuring-distance', active);
+      if (active) map.doubleClickZoom.disable();
+      else if (!drawing) map.doubleClickZoom.enable();
+    }
+    function stopRuler(clear = false) {
+      if (clear) clearRulerGraphics();
+      else if (rulerPreviewLine) rulerPreviewLine.setLatLngs([]);
+      rulerCursor = null;
+      setRulerActive(false);
+      rulerReadout.hidden = clear || !rulerPoints.length;
+      if (!rulerReadout.hidden) updateRulerReadout();
+    }
+    rulerToggle.addEventListener('click', () => {
+      if (rulerActive) { stopRuler(); return; }
+      if (drawing) stopDrawing();
+      clearRulerGraphics();
+      ensureRulerLayers();
+      setRulerActive(true);
+      rulerReadout.hidden = false;
+      updateRulerReadout();
+    });
+    rulerClear.addEventListener('click', () => { stopRuler(true); rulerToggle.focus(); });
+    map.on('click', event => {
+      if (!rulerActive) return;
+      const point = event.latlng;
+      if (rulerPoints.length) rulerDistance += map.distance(rulerPoints.at(-1), point);
+      rulerPoints.push(point);
+      rulerCursor = null;
+      rulerFixedLine.setLatLngs(rulerPoints);
+      rulerPreviewLine.setLatLngs([]);
+      L.circleMarker(point,{pane:'measurePane', interactive:false, radius:3.5,
+        color:'#2777a6', weight:1.5, fillColor:'#fff', fillOpacity:1}).addTo(rulerDots);
+      updateRulerReadout();
+    });
+    map.on('mousemove', event => {
+      if (!rulerActive || !rulerPoints.length) return;
+      rulerCursor = event.latlng;
+      rulerPreviewLine.setLatLngs([rulerPoints.at(-1), rulerCursor]);
+      updateRulerReadout(true);
+    });
+    map.on('contextmenu', event => {
+      if (!rulerActive) return;
+      event.originalEvent?.preventDefault();
+      stopRuler(!rulerPoints.length);
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !rulerActive) return;
+      event.preventDefault();
+      stopRuler(true);
+    });
+    // --- End map distance ruler ------------------------------------------------
 
     // The desktop workspace can be resized by dragging the splitter, just like a GIS layers dock.
     // Recalculate the Leaflet viewport after each width change so tiles and map interactions
@@ -4010,6 +4154,7 @@
         : 'Left-click your first corner, drag to size the rectangle, then right-click to finish. Press Esc to cancel.';
     }
     function openCreateShapeModal() {
+      if (rulerActive) stopRuler();
       if (drawing) stopDrawing();
       createdShapeName.value = `Shape ${nextCreatedId}`;
       updateShapeInstructions();
