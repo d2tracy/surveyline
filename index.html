@@ -437,7 +437,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.14</span>
+      <span>Version 1.7.15</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -917,6 +917,54 @@
   <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
     'use strict';
+
+    // Leaflet 1.9.4 GridLayer.redraw() incorrectly uses the map's fractional zoom
+    // as a tile level. BathTub deliberately supports 0.05-step zooming, but tiles
+    // must always be indexed at integer levels. Patch GeoRasterLayer only: the
+    // original basemap and all survey geometry keep their existing behavior.
+    // Leaflet issue #9930: https://github.com/Leaflet/Leaflet/issues/9930
+    function patchRasterFractionalZoomRedraw() {
+      if (typeof GeoRasterLayer !== 'function') return;
+      const proto = GeoRasterLayer.prototype;
+      if (proto.__bathTubIntegerTileRedraw) return;
+      proto.redraw = function () {
+        if (!this._map) return this;
+        this._removeAllTiles();
+        const tileZoom = this._clampZoom(Math.round(this._map.getZoom()));
+        if (tileZoom !== this._tileZoom) {
+          this._tileZoom = tileZoom;
+          this._updateLevels();
+          this._resetGrid();
+        }
+        this._update();
+        return this;
+      };
+      proto.__bathTubIntegerTileRedraw = true;
+    }
+    patchRasterFractionalZoomRedraw();
+
+    // Raster tiles can occasionally fail to render while rapidly zooming. Give
+    // a failed view one delayed retry (never an unlimited redraw loop). A small
+    // tile buffer also prevents thousands of off-screen canvases accumulating.
+    function guardRasterTileErrors(layer) {
+      let pendingRetry = null;
+      let lastRetriedView = null;
+      layer.on('tileerror', () => {
+        if (!layer._map || pendingRetry !== null) return;
+        const center = layer._map.getCenter();
+        const viewKey = `${layer._map.getZoom().toFixed(3)}:${center.lat.toFixed(4)}:${center.lng.toFixed(4)}`;
+        if (viewKey === lastRetriedView) return;
+        lastRetriedView = viewKey;
+        pendingRetry = setTimeout(() => {
+          pendingRetry = null;
+          if (layer._map && typeof layer.redraw === 'function') layer.redraw();
+        }, 250);
+      });
+      layer.on('remove', () => {
+        if (pendingRetry !== null) clearTimeout(pendingRetry);
+        pendingRetry = null;
+      });
+    }
 
     const map = L.map('map', { zoomControl: true, zoomSnap: 0.05 }).setView([51.9, -8.45], 9);
 
@@ -3267,11 +3315,14 @@
           width,height,noDataValue:0
         });
         preview=new GeoRasterLayer({georaster:raster,proj4,opacity:1,resolution:256,pane:'coveragePane',
+          // Keep nearby tiles only; large default buffers can exhaust canvas memory.
+          keepBuffer:4, updateWhenIdle:false, updateWhenZooming:false, caching:false,
           resampleMethod:'nearest',
           pixelValuesToColorFn: values => {
             const value=values?.[0];
             return value===1?'#d63237':value===2?'#f6d539':value===3?'#26a05a':null;
           }});
+        guardRasterTileErrors(preview);
         bounds=preview.getBounds();
       }
       if (!validBounds(bounds)) throw new Error('Coverage TIFF bounds cannot be displayed.');
@@ -4856,7 +4907,11 @@
       const rasterConfig = { georaster, min, max, stretch, type: 'none', inverted: false };
       const layer = new GeoRasterLayer({ georaster, proj4, opacity: 0.82, resolution: 128,
         pane: 'importedRasterPane',
+        // GeoRasterLayer otherwise retains up to 25 rows/columns of off-screen
+        // tiles. Limit canvas memory and refresh new tiles as the map moves.
+        keepBuffer:4, updateWhenIdle:false, updateWhenZooming:false, caching:false,
         pixelValuesToColorFn: makeRasterColorFn(rasterConfig) });
+      guardRasterTileErrors(layer);
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error(`The raster bounds could not be mapped from EPSG:${rasterCRS.code}. Check the GeoTIFF georeferencing.`);
       registerLayer(file.name, `Raster · EPSG:${rasterCRS.code}`, layer, bounds, rasterConfig);
