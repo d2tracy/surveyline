@@ -444,7 +444,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.7.16</span>
+      <span>Version 1.7.17</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -759,6 +759,18 @@
         <button id="skipRasterType" class="export-button secondary" type="button">Keep as None</button>
         <button id="confirmRasterType" class="export-button" type="button">Apply Type</button>
       </div>
+    </section>
+  </div>
+
+  <!-- A shapefile without polygon geometry may be viewed, but cannot be a survey area. -->
+  <div class="survey-modal-backdrop" id="nonPolygonShapefileModal" hidden>
+    <section class="survey-dialog" role="alertdialog" aria-modal="true" aria-labelledby="nonPolygonShapefileTitle" aria-describedby="nonPolygonShapefileDescription">
+      <div class="survey-dialog-head">
+        <h2 id="nonPolygonShapefileTitle">No polygons found</h2>
+      </div>
+      <p id="nonPolygonShapefileNames" class="depth-source"></p>
+      <p id="nonPolygonShapefileDescription" class="depth-description">This shapefile does not contain any polygon geometry. It has been imported as a map layer, but it cannot be used as a Survey Area in Plan Survey. To plan a survey, import or create a polygon.</p>
+      <button id="acknowledgeNonPolygonShapefile" class="survey-draw" type="button">OK</button>
     </section>
   </div>
 
@@ -1579,20 +1591,37 @@
     const exportPlanSummaryPdfCheckbox = document.getElementById('exportPlanSummaryPdf');
 
 
+    // Geometry must actually contain at least one usable polygon; a line or
+    // point shapefile is still a valid *map layer*, not a survey boundary.
+    function hasSurveyPolygonGeometry(node) {
+      if (!node) return false;
+      if (Array.isArray(node)) return node.some(hasSurveyPolygonGeometry);
+      if (node.type === 'FeatureCollection') return (node.features || []).some(hasSurveyPolygonGeometry);
+      if (node.type === 'Feature') return hasSurveyPolygonGeometry(node.geometry);
+      if (node.type === 'GeometryCollection') return (node.geometries || []).some(hasSurveyPolygonGeometry);
+      if (node.type === 'Polygon')
+        return Array.isArray(node.coordinates) && node.coordinates.some(ring => Array.isArray(ring) && ring.length >= 4);
+      if (node.type === 'MultiPolygon')
+        return Array.isArray(node.coordinates) && node.coordinates.some(polygon =>
+          Array.isArray(polygon) && polygon.some(ring => Array.isArray(ring) && ring.length >= 4));
+      return false;
+    }
+
     // Imported polygon shapefiles and hand-created polygons can both be
     // survey areas. Created layer keys are prefixed to avoid ID collisions.
     function selectedSurveyAreaRecord() {
       return records.get(surveyAreaSelect.value) || createdRecords.get(surveyAreaSelect.value) || null;
     }
     function validSurveyArea(record) {
-      return record && (record.sourceFormat === 'shapefile' || record.sourceFormat === 'created');
+      return Boolean(record && (record.sourceFormat === 'created' ||
+        (record.sourceFormat === 'shapefile' && record.hasSurveyPolygon)));
     }
     function updateSurveyAreaOptions() {
       const previous = surveyAreaSelect.value;
       surveyAreaSelect.replaceChildren(new Option('Select a shapefile or created polygon…', ''));
       let count = 0;
       for (const [id, record] of records) {
-        if (record.sourceFormat !== 'shapefile') continue;
+        if (record.sourceFormat !== 'shapefile' || !record.hasSurveyPolygon) continue;
         surveyAreaSelect.add(new Option(record.name, id)); count++;
       }
       for (const [id, record] of createdRecords) {
@@ -4489,7 +4518,8 @@
 
     function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null, sourceData = null) {
       const id = String(nextId++);
-      records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat, sourceData });
+      records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat, sourceData,
+        hasSurveyPolygon: sourceFormat === 'shapefile' && hasSurveyPolygonGeometry(sourceData) });
       if (visible) layer.addTo(map);
       const item = document.createElement('div');
       item.className = 'layer';
@@ -4531,7 +4561,7 @@
       return id;
     }
 
-    function addGeoJSON(data, filename, fromShapefile = false) {
+    function addGeoJSON(data, filename, fromShapefile = false, nonPolygonLayerNames = null) {
       const datasets = Array.isArray(data) ? data : [data];
       let count = 0;
       for (const dataset of datasets) {
@@ -4549,9 +4579,40 @@
         }
         const label = dataset.fileName || filename;
         registerLayer(label, 'Vector layer', layer, bounds, null, true, fromShapefile ? 'shapefile' : 'geojson', dataset);
+        if (fromShapefile && nonPolygonLayerNames && !hasSurveyPolygonGeometry(dataset))
+          nonPolygonLayerNames.push(label);
         count++;
       }
       return count;
+    }
+
+    // Import warnings use the same modal layout as the other BathTub tools.
+    // Wait for dismissal before opening the next file's dialog.
+    const nonPolygonShapefileModal = document.getElementById('nonPolygonShapefileModal');
+    const nonPolygonShapefileNames = document.getElementById('nonPolygonShapefileNames');
+    const acknowledgeNonPolygonShapefileBtn = document.getElementById('acknowledgeNonPolygonShapefile');
+    let nonPolygonShapefileResolver = null;
+    let nonPolygonShapefilePreviousFocus = null;
+    function finishNonPolygonShapefileWarning() {
+      nonPolygonShapefileModal.hidden = true;
+      const done = nonPolygonShapefileResolver;
+      nonPolygonShapefileResolver = null;
+      if (nonPolygonShapefilePreviousFocus?.isConnected) nonPolygonShapefilePreviousFocus.focus();
+      nonPolygonShapefilePreviousFocus = null;
+      if (done) done();
+    }
+    acknowledgeNonPolygonShapefileBtn.addEventListener('click', finishNonPolygonShapefileWarning);
+    nonPolygonShapefileModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finishNonPolygonShapefileWarning(); }
+      else if (event.key === 'Tab') { event.preventDefault(); acknowledgeNonPolygonShapefileBtn.focus(); }
+    });
+    function warnNonPolygonShapefile(names) {
+      if (!names.length) return Promise.resolve();
+      nonPolygonShapefilePreviousFocus = document.activeElement;
+      nonPolygonShapefileNames.textContent = names.join(', ');
+      nonPolygonShapefileModal.hidden = false;
+      acknowledgeNonPolygonShapefileBtn.focus();
+      return new Promise(resolve => { nonPolygonShapefileResolver = resolve; });
     }
 
     // .shp contains geometry on its own. Companion .shx is unnecessary for sequential
@@ -4671,15 +4732,19 @@
       if (dbf) properties = shp.parseDbf(await dbf.arrayBuffer(), cpg ? await cpg.text() : undefined);
       const geojson = shp.combine([geometries, properties]);
       geojson.fileName = baseName;
-      const count = addGeoJSON(geojson, file.name, true);
+      const nonPolygonNames = [];
+      const count = addGeoJSON(geojson, file.name, true, nonPolygonNames);
       setStatus(`Loaded ${count} layer${count === 1 ? '' : 's'} from ${file.name} (${crsLabel}).`);
+      await warnNonPolygonShapefile(nonPolygonNames);
     }
 
     async function addShapefile(file) {
       if (typeof shp !== 'function') throw new Error('Shapefile reader did not load. Check your internet connection.');
       const result = await shp(await file.arrayBuffer());
-      const count = addGeoJSON(result, file.name, true);
+      const nonPolygonNames = [];
+      const count = addGeoJSON(result, file.name, true, nonPolygonNames);
       setStatus(`Loaded ${count} shapefile layer${count === 1 ? '' : 's'} from ${file.name}.`);
+      await warnNonPolygonShapefile(nonPolygonNames);
     }
 
     // Raster colorization and robust 2–98% statistics. The cut *clips the
