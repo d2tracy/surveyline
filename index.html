@@ -504,7 +504,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.5</span>
+      <span>Version 1.8.6</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -3300,6 +3300,33 @@
       setSurveyLineSelected(record, line, !line.selected);
     }
 
+    // A click on the map away from a planned line clears highlighted line
+    // selections, just like clicking empty space in a GIS canvas. Keep line
+    // clicks exempt so users can still select/deselect individual survey lines.
+    function handleSurveyLineClick(planId, lineId, event) {
+      if (event?.originalEvent) event.originalEvent._bathTubSurveyLineClick = true;
+      toggleSurveyLineSelected(planId, lineId);
+    }
+
+    function clearAllSelectedSurveyLines() {
+      for (const record of plannedRecords.values()) {
+        for (const line of record.lines.values()) {
+          if (line.selected) setSurveyLineSelected(record, line, false);
+        }
+      }
+    }
+
+    map.on('click', event => {
+      // Ignore a click dispatched from a survey line (Leaflet normally bubbles
+      // vector clicks to the map). The native-event marker also covers browsers
+      // that do not expose sourceTarget on propagated click events.
+      if (event.originalEvent?.button != null && event.originalEvent.button !== 0) return;
+      if (event.originalEvent?._bathTubSurveyLineClick ||
+          event.sourceTarget?.options?.pane === 'plannedPane' ||
+          event.propagatedFrom?.options?.pane === 'plannedPane') return;
+      clearAllSelectedSurveyLines();
+    });
+
 
     // Parallel lines translate every existing vertex in the survey area's local
     // metre-based CRS. Keeping all intermediate vertices preserves the original
@@ -3422,7 +3449,7 @@
         onEachFeature(_feature,layer){surveyLayer=layer;}});
       if (!surveyLayer) throw new Error('Unable to create the new survey line geometry.');
       surveyLayer.bindTooltip(`${name} · parallel ${separation} m ${direction.toLowerCase()}`);
-      surveyLayer.on('click',()=>toggleSurveyLineSelected(record.id,lineId));
+      surveyLayer.on('click',event=>handleSurveyLineClick(record.id,lineId,event));
       surveyLayer.on('contextmenu',event=>openSurveyLineContextMenu(record.id,lineId,event));
       const row = document.createElement('label');
       row.className = 'planned-line-row';
@@ -4053,7 +4080,7 @@
             : `Line ${String(sequence).padStart(3, '0')}`;
           const lengthMeters = feature.properties.length_m;
           surveyLine.bindTooltip(`${lineName} · ${spacing} m spacing`);
-          surveyLine.on('click', () => toggleSurveyLineSelected(id, lineId));
+          surveyLine.on('click',event=>handleSurveyLineClick(id,lineId,event));
           surveyLine.on('contextmenu', event => openSurveyLineContextMenu(id, lineId, event));
           lineEntries.set(lineId, { id: lineId, name: lineName, isCrossline,
             passNumber: feature.properties.line, lengthMeters, layer: surveyLine,
