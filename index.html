@@ -173,6 +173,14 @@
     /* Planned Lines uses the same unboxed section layout and typography as Imported Layers. */
     .planned-area { background: transparent; border: 0; padding: 22px 0 0; margin-top: 0; }
     .planned-empty { color: #78929e; font-size: 13px; padding: 12px 0; }
+    /* Focus on Leaflet's SVG line can draw a large black bounding box in Chrome.
+       Survey lines already have an obvious selected stroke; suppress only this
+       browser-generated SVG focus outline, not outlines on sidebar controls. */
+    #map .bath-survey-line-pane .leaflet-interactive:focus,
+    #map .bath-survey-line-pane .leaflet-interactive:focus-visible { outline: none !important; }
+    .survey-marquee { position: absolute; z-index: 900; border: 1.5px dashed #2777a6;
+      background: rgba(39,119,166,.16); pointer-events: none; box-sizing: border-box; }
+    .survey-marquee[hidden] { display: none !important; }
     /* One plan row contains a collapsible list of individually selectable lines. */
     .planned-item { border: 1px solid #e2ecf0; background: #fff; border-radius: 8px; margin-top: 8px; overflow: hidden; }
     .planned-header { display: flex; gap: 6px; align-items: center; padding: 8px 6px; }
@@ -504,7 +512,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.6</span>
+      <span>Version 1.8.7</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1239,6 +1247,8 @@
       // Raster previews should never block survey line interactions underneath.
       if (name === 'coveragePane' || name === 'importedRasterPane' || name === 'measurePane') pane.style.pointerEvents = 'none';
     }
+
+    map.getPane('plannedPane').classList.add('bath-survey-line-pane');
 
     // --- Map distance ruler ----------------------------------------------------
     // Distances use Leaflet's geodesic Earth distance between WGS84 positions,
@@ -3304,8 +3314,11 @@
     // selections, just like clicking empty space in a GIS canvas. Keep line
     // clicks exempt so users can still select/deselect individual survey lines.
     function handleSurveyLineClick(planId, lineId, event) {
+      if (surveyMarqueeGesture?.dragging) return;
       if (event?.originalEvent) event.originalEvent._bathTubSurveyLineClick = true;
       toggleSurveyLineSelected(planId, lineId);
+      // Browser SVG path focus sometimes draws a black bounding rectangle.
+      plannedRecords.get(planId)?.lines.get(lineId)?.layer.getElement?.()?.blur?.();
     }
 
     function clearAllSelectedSurveyLines() {
@@ -3327,6 +3340,144 @@
       clearAllSelectedSurveyLines();
     });
 
+
+    // Right-drag marquee: select any visible planned survey line intersecting
+    // the on-screen rectangle. Keep a stationary right-click available for the
+    // existing survey-line edit menu. All hit testing is in map pixel space,
+    // so the result follows the current zoom and projection precisely.
+    const surveyMarqueeEl = document.createElement('div');
+    surveyMarqueeEl.className = 'survey-marquee';
+    surveyMarqueeEl.hidden = true;
+    map.getContainer().append(surveyMarqueeEl);
+    let surveyMarqueeGesture = null;
+    let suppressMarqueeContextMenuUntil = 0;
+    const surveyMarqueeThreshold = 7;
+    const mapCanvasEl = map.getContainer();
+
+    function mapGesturePoint(event) {
+      const bounds = mapCanvasEl.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+        y: Math.max(0, Math.min(bounds.height, event.clientY - bounds.top))
+      };
+    }
+    function marqueeBounds(a, b) {
+      return {left:Math.min(a.x,b.x),right:Math.max(a.x,b.x),
+        top:Math.min(a.y,b.y),bottom:Math.max(a.y,b.y)};
+    }
+    function drawSurveyMarquee() {
+      if (!surveyMarqueeGesture?.dragging) return;
+      const box = marqueeBounds(surveyMarqueeGesture.start, surveyMarqueeGesture.end);
+      surveyMarqueeEl.style.left = `${box.left}px`;
+      surveyMarqueeEl.style.top = `${box.top}px`;
+      surveyMarqueeEl.style.width = `${box.right-box.left}px`;
+      surveyMarqueeEl.style.height = `${box.bottom-box.top}px`;
+      surveyMarqueeEl.hidden = false;
+    }
+    function pointInMarquee(p, r) {
+      return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
+    }
+    function lineIntersectsMarquee(a, b, r) {
+      if (pointInMarquee(a,r) || pointInMarquee(b,r)) return true;
+      // Liang–Barsky finite-segment vs axis-aligned rectangle clipping.
+      const dx=b.x-a.x, dy=b.y-a.y;
+      const p=[-dx,dx,-dy,dy], q=[a.x-r.left,r.right-a.x,a.y-r.top,r.bottom-a.y];
+      let entry=0, exit=1;
+      for(let i=0;i<4;i++) {
+        if(Math.abs(p[i])<1e-10) {if(q[i]<0) return false;continue;}
+        const u=q[i]/p[i];
+        if(p[i]<0) entry=Math.max(entry,u);
+        else exit=Math.min(exit,u);
+        if(entry>exit) return false;
+      }
+      return true;
+    }
+    function surveyLineIntersectsMarquee(layer, rectangle) {
+      const coordinates=layer.getLatLngs?.();
+      if(!Array.isArray(coordinates)) return false;
+      // Planned lines are LineStrings. Keep nested geometries independent so
+      // distinct crossline parts are not joined by a fictitious segment.
+      function checkSequence(points) {
+        if(!points.length) return false;
+        if(Array.isArray(points[0])) return points.some(checkSequence);
+        const projected=points.map(pt=>map.latLngToContainerPoint(pt));
+        if(projected.some(p=>pointInMarquee(p,rectangle))) return true;
+        for(let i=1;i<projected.length;i++)
+          if(lineIntersectsMarquee(projected[i-1],projected[i],rectangle)) return true;
+        return false;
+      }
+      return checkSequence(coordinates);
+    }
+    function selectLinesWithinMarquee(rectangle, additive=false) {
+      const hits=[];
+      for(const record of plannedRecords.values()) {
+        if(!map.hasLayer(record.layer)) continue;
+        for(const line of record.lines.values()) {
+          if(!record.layer.hasLayer(line.layer)) continue;
+          if(surveyLineIntersectsMarquee(line.layer,rectangle)) hits.push({record,line});
+        }
+      }
+      if(!additive) clearAllSelectedSurveyLines();
+      for(const {record,line} of hits) if(!line.selected) setSurveyLineSelected(record,line,true);
+      return hits.length;
+    }
+    function canStartSurveyMarquee(event) {
+      if(event.button!==2 || !plannedRecords.size || drawing || rulerActive ||
+        document.querySelector('.survey-modal-backdrop:not([hidden])')) return false;
+      // Leave popovers and the map's own controls interactive.
+      if(event.target.closest('.leaflet-control, .map-tools-dock, .drawing-notice')) return false;
+      return true;
+    }
+    mapCanvasEl.addEventListener('pointerdown', event => {
+      if (!canStartSurveyMarquee(event)) return;
+      suppressMarqueeContextMenuUntil = 0;
+      hideSurveyLineContextMenu();
+      const point=mapGesturePoint(event);
+      surveyMarqueeGesture={pointerId:event.pointerId,start:point,end:point,
+        startClientX:event.clientX,startClientY:event.clientY,
+        dragging:false,pendingMenu:null,additive:event.shiftKey};
+    }, true);
+    window.addEventListener('pointermove', event => {
+      const gesture=surveyMarqueeGesture;
+      if(!gesture || event.pointerId!==gesture.pointerId) return;
+      gesture.end=mapGesturePoint(event);
+      if(!gesture.dragging && Math.hypot(event.clientX-gesture.startClientX,
+         event.clientY-gesture.startClientY)>=surveyMarqueeThreshold) {
+        gesture.dragging=true;
+        hideSurveyLineContextMenu();
+      }
+      if(gesture.dragging) {drawSurveyMarquee();event.preventDefault();}
+    }, true);
+    window.addEventListener('pointerup', event => {
+      const gesture=surveyMarqueeGesture;
+      if(!gesture || event.pointerId!==gesture.pointerId || event.button!==2) return;
+      gesture.end=mapGesturePoint(event);
+      if(gesture.dragging) {
+        selectLinesWithinMarquee(marqueeBounds(gesture.start,gesture.end),gesture.additive);
+        suppressMarqueeContextMenuUntil=performance.now()+400;
+      } else if(gesture.pendingMenu) {
+        const {planId,lineId,clientX,clientY}=gesture.pendingMenu;
+        showSurveyLineContextMenu(planId,lineId,clientX,clientY);
+      }
+      surveyMarqueeGesture=null;
+      surveyMarqueeEl.hidden=true;
+    }, true);
+    window.addEventListener('pointercancel', event=>{
+      if(surveyMarqueeGesture?.pointerId!==event.pointerId) return;
+      surveyMarqueeGesture=null;
+      surveyMarqueeEl.hidden=true;
+    }, true);
+    mapCanvasEl.addEventListener('contextmenu', event=>{
+      // Chrome can fire contextmenu on right-button down, before the drag has
+      // crossed the threshold, or after pointerup. Never open a browser menu
+      // from an active selection gesture.
+      if(surveyMarqueeGesture) {
+        event.preventDefault();
+        if(surveyMarqueeGesture.dragging) event.stopImmediatePropagation();
+      } else if(performance.now()<suppressMarqueeContextMenuUntil) {
+        event.preventDefault();event.stopImmediatePropagation();
+      }
+    }, true);
 
     // Parallel lines translate every existing vertex in the survey area's local
     // metre-based CRS. Keeping all intermediate vertices preserves the original
@@ -3375,22 +3526,34 @@
       return {projection, points, perp, sideChoices};
     }
 
+    function showSurveyLineContextMenu(planId, lineId, clientX, clientY) {
+      const record = plannedRecords.get(planId), line = record?.lines.get(lineId);
+      if (!record || !line) return;
+      setSurveyLineSelected(record, line, true);
+      line.layer.getElement?.()?.blur?.();
+      activeSurveyLineMenu = {planId, lineId};
+      surveyLineContextMenu.hidden = false;
+      const width = surveyLineContextMenu.offsetWidth || 186;
+      const height = surveyLineContextMenu.offsetHeight || 132;
+      surveyLineContextMenu.style.left = `${Math.max(5, Math.min(clientX, window.innerWidth - width - 6))}px`;
+      surveyLineContextMenu.style.top = `${Math.max(5, Math.min(clientY, window.innerHeight - height - 6))}px`;
+      surveyLineAddParallelMenuBtn.focus();
+    }
     function openSurveyLineContextMenu(planId, lineId, event) {
       if (drawing || rulerActive || !parallelLineModal.hidden || !increaseLineLengthModal.hidden) return;
       const record = plannedRecords.get(planId), line = record?.lines.get(lineId);
       if (!record || !line) return;
       const original = event.originalEvent;
       if (original) L.DomEvent.stop(original);
-      setSurveyLineSelected(record, line, true);
-      activeSurveyLineMenu = {planId, lineId};
-      surveyLineContextMenu.hidden = false;
-      const clientX = original?.clientX ?? map.latLngToContainerPoint(event.latlng).x + map.getContainer().getBoundingClientRect().left;
-      const clientY = original?.clientY ?? map.latLngToContainerPoint(event.latlng).y + map.getContainer().getBoundingClientRect().top;
-      const width = surveyLineContextMenu.offsetWidth || 186;
-      const height = surveyLineContextMenu.offsetHeight || 132;
-      surveyLineContextMenu.style.left = `${Math.max(5, Math.min(clientX, window.innerWidth - width - 6))}px`;
-      surveyLineContextMenu.style.top = `${Math.max(5, Math.min(clientY, window.innerHeight - height - 6))}px`;
-      surveyLineAddParallelMenuBtn.focus();
+      const clientX = original?.clientX ?? map.latLngToContainerPoint(event.latlng).x + mapCanvasEl.getBoundingClientRect().left;
+      const clientY = original?.clientY ?? map.latLngToContainerPoint(event.latlng).y + mapCanvasEl.getBoundingClientRect().top;
+      if(surveyMarqueeGesture) {
+        if(!surveyMarqueeGesture.dragging)
+          surveyMarqueeGesture.pendingMenu={planId,lineId,clientX,clientY};
+        return;
+      }
+      if(performance.now()<suppressMarqueeContextMenuUntil) return;
+      showSurveyLineContextMenu(planId,lineId,clientX,clientY);
     }
 
     function openParallelLineModal() {
