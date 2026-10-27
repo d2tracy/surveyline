@@ -512,7 +512,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.7</span>
+      <span>Version 1.8.8</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1044,7 +1044,7 @@
   <!-- Right-click menu is positioned beside the map cursor, like SIS. -->
   <div id="surveyLineContextMenu" class="survey-line-context" role="menu" aria-label="Survey line actions" hidden>
     <button id="surveyLineAddParallelMenu" type="button" role="menuitem">Add parallel line</button>
-    <button id="surveyLineIncreaseLengthMenu" type="button" role="menuitem">Increase length</button>
+    <button id="surveyLineIncreaseLengthMenu" type="button" role="menuitem">Increase/decrease length</button>
     <button id="surveyLineDeleteMenu" class="delete-line-action" type="button" role="menuitem">Delete line</button>
   </div>
 
@@ -1075,24 +1075,24 @@
   <div class="survey-modal-backdrop" id="increaseLineLengthModal" hidden>
     <section class="survey-dialog parallel-line-dialog length-line-dialog" role="dialog" aria-modal="true" aria-labelledby="increaseLineLengthTitle">
       <div class="survey-dialog-head">
-        <h2 id="increaseLineLengthTitle">Increase Line Length</h2>
-        <button id="closeIncreaseLineLengthModal" class="survey-close" type="button" aria-label="Close Increase Line Length">×</button>
+        <h2 id="increaseLineLengthTitle">Increase/Decrease Line Length</h2>
+        <button id="closeIncreaseLineLengthModal" class="survey-close" type="button" aria-label="Close Increase/Decrease Line Length">×</button>
       </div>
       <p id="increaseLineLengthSource" class="parallel-line-source"></p>
       <div class="parallel-line-field">
-        <label for="increaseLineLengthMeters">Increase length by (m)</label>
+        <label for="increaseLineLengthMeters">Change length by (m)</label>
         <div class="survey-input-unit">
-          <input id="increaseLineLengthMeters" class="survey-parameter-input" type="number" min="0.001" max="100000" step="any" inputmode="decimal" placeholder="Enter additional length" required>
+          <input id="increaseLineLengthMeters" class="survey-parameter-input" type="number" min="-100000" max="100000" step="any" inputmode="decimal" placeholder="Positive to extend, negative to shorten" required>
           <span>m</span>
         </div>
       </div>
       <div class="parallel-line-field">
-        <label for="increaseLineLengthDirection">Direction of extension</label>
+        <label for="increaseLineLengthDirection">Direction of length change</label>
         <select id="increaseLineLengthDirection" class="survey-parameter-select"></select>
-        <p class="survey-hint">Evenly adds half the entered distance to each end. A bearing option extends only the corresponding end.</p>
+        <p class="survey-hint">A positive value extends the line; a negative value shortens it. Evenly divides the change between both ends.</p>
       </div>
       <p id="increaseLineLengthError" class="survey-error" role="alert" hidden></p>
-      <button id="confirmIncreaseLineLength" class="survey-draw" type="button">Increase length</button>
+      <button id="confirmIncreaseLineLength" class="survey-draw" type="button">Change line length</button>
     </section>
   </div>
 
@@ -3726,26 +3726,66 @@
       document.body.style.overflow='';
       map.getContainer().focus?.();
     }
-    function extendSurveyLine(record,line,addedMeters,extensionMode) {
-      if(!Number.isFinite(addedMeters)||addedMeters<=0||addedMeters>100000)
-        throw new Error('Enter an additional length greater than 0 and no more than 100,000 m.');
+    // For negative changes, follow the existing polyline instead of simply
+    // moving an endpoint past its neighbouring vertex. This safely shortens
+    // bent or densified lines without reversing segments or changing bearings.
+    function trimSurveyLinePoints(points, trimStart, trimEnd) {
+      const lengths=[0];
+      for(let i=1;i<points.length;i++) {
+        lengths.push(lengths[i-1]+Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]));
+      }
+      const total=lengths.at(-1);
+      if(!(total>0.1) || trimStart+trimEnd>=total-0.1)
+        throw new Error('The requested decrease would remove the entire line. Leave at least 0.1 m.');
+      const sampleAt=distance=>{
+        for(let i=1;i<points.length;i++) {
+          if(distance<=lengths[i] || i===points.length-1) {
+            const segment=lengths[i]-lengths[i-1];
+            if(segment<=0) return points[i].slice();
+            const fraction=Math.max(0,Math.min(1,(distance-lengths[i-1])/segment));
+            return [points[i-1][0]+fraction*(points[i][0]-points[i-1][0]),
+              points[i-1][1]+fraction*(points[i][1]-points[i-1][1])];
+          }
+        }
+        return points.at(-1).slice();
+      };
+      const endPosition=total-trimEnd;
+      const result=[sampleAt(trimStart)];
+      for(let i=1;i<points.length-1;i++) {
+        if(lengths[i]>trimStart+1e-7 && lengths[i]<endPosition-1e-7)
+          result.push(points[i].slice());
+      }
+      result.push(sampleAt(endPosition));
+      return result;
+    }
+    function changeSurveyLineLength(record,line,changeMeters,extensionMode) {
+      if(!Number.isFinite(changeMeters) || changeMeters===0 || Math.abs(changeMeters)>100000)
+        throw new Error('Enter a non-zero length change between -100,000 and 100,000 m.');
       if(!['even','first','last'].includes(extensionMode))
-        throw new Error('Choose how the extra length should be distributed.');
-      const details=lengthExtensionGeometry(record,line);
-      const {points,projection,firstOut,lastOut}=details;
-      const extended=points.map(p=>p.slice());
-      const startMetres=extensionMode==='last'?0:extensionMode==='even'?addedMeters/2:addedMeters;
-      const endMetres=extensionMode==='first'?0:extensionMode==='even'?addedMeters/2:addedMeters;
-      extended[0]=[points[0][0]+firstOut[0]*startMetres,points[0][1]+firstOut[1]*startMetres];
-      const lastIndex=points.length-1;
-      extended[lastIndex]=[points[lastIndex][0]+lastOut[0]*endMetres,points[lastIndex][1]+lastOut[1]*endMetres];
-      const lnglats=extended.map(p=>projection.inverse(p));
+        throw new Error('Choose how the length should be changed.');
+      if(changeMeters<0 && line.lengthMeters+changeMeters<=0.1)
+        throw new Error(`Cannot shorten a ${line.lengthMeters.toFixed(1)} m line by ${Math.abs(changeMeters)} m. Leave at least 0.1 m.`);
+      const {points,projection,firstOut,lastOut}=lengthExtensionGeometry(record,line);
+      const startMetres=extensionMode==='last'?0:extensionMode==='even'?changeMeters/2:changeMeters;
+      const endMetres=extensionMode==='first'?0:extensionMode==='even'?changeMeters/2:changeMeters;
+      let changed;
+      if(changeMeters<0) {
+        changed=trimSurveyLinePoints(points,-startMetres,-endMetres);
+      } else {
+        changed=points.map(p=>p.slice());
+        changed[0]=[points[0][0]+firstOut[0]*startMetres,
+          points[0][1]+firstOut[1]*startMetres];
+        const lastIndex=points.length-1;
+        changed[lastIndex]=[points[lastIndex][0]+lastOut[0]*endMetres,
+          points[lastIndex][1]+lastOut[1]*endMetres];
+      }
+      const lnglats=changed.map(p=>projection.inverse(p));
       if(lnglats.some(p=>!p.every(Number.isFinite)||Math.abs(p[0])>180||Math.abs(p[1])>90))
-        throw new Error('The extended line is outside the valid map coordinates.');
-      // Update the existing Leaflet layer to retain click/contextmenu handlers,
-      // selection, plan membership, and export from its current geometry.
+        throw new Error('The changed line is outside valid map coordinates.');
+      // Update the same Leaflet layer to preserve its click/right-click handlers,
+      // plan membership, highlighted state, and the live geometry used in export.
       line.layer.setLatLngs(lnglats.map(([lon,lat])=>[lat,lon]));
-      line.lengthMeters+=addedMeters;
+      line.lengthMeters+=changeMeters;
       if(line.layer.feature?.properties) line.layer.feature.properties.length_m=line.lengthMeters;
       line.row.querySelector('.planned-line-length').textContent=`${Math.round(line.lengthMeters)} m`;
       record.bounds=record.layer.getBounds();
@@ -3769,10 +3809,10 @@
       const line=record?.lines.get(activeIncreaseLineLength?.lineId);
       if(!line) {closeIncreaseLineLengthModal();return;}
       try {
-        extendSurveyLine(record,line,Number(increaseLineLengthMetersEl.value),increaseLineLengthDirectionEl.value);
+        changeSurveyLineLength(record,line,Number(increaseLineLengthMetersEl.value),increaseLineLengthDirectionEl.value);
         closeIncreaseLineLengthModal();
       } catch(error){
-        increaseLineLengthErrorEl.textContent=error.message||'Unable to increase line length.';
+        increaseLineLengthErrorEl.textContent=error.message||'Unable to change line length.';
         increaseLineLengthErrorEl.hidden=false;
       }
     });
