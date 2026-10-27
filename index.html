@@ -206,6 +206,8 @@
     .raster-import-dialog { width: min(440px,100%); }
     .raster-import-help { margin: -8px 0 14px; font-size: 13px; line-height: 1.55; }
     .raster-import-filename { margin: 0 0 17px; padding: 10px 12px; background: #f2f7f9; border: 1px solid #dce8ef; font-size: 12px; overflow-wrap: anywhere; }
+    .raster-import-note { margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: #476b7c; }
+    .raster-import-note strong { color: #17334b; font-weight: 750; }
     .raster-import-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
     .raster-import-actions button { border-radius: 0; }
 
@@ -498,7 +500,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.2</span>
+      <span>Version 1.8.3</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -800,6 +802,7 @@
         <option value="sidescan">Sidescan</option>
         <option value="backscatter">Backscatter</option>
       </select>
+      <p class="raster-import-note"><strong>NOTE:</strong> Many Bathtub features REQUIRE a depth layer set as bathymetry to function</p>
       <div class="raster-import-actions">
         <button id="skipRasterType" class="export-button secondary" type="button">Keep as None</button>
         <button id="confirmRasterType" class="export-button" type="button">Apply Type</button>
