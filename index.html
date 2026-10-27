@@ -88,6 +88,7 @@
     .depth-calculate.is-complete { background: #fff; color: #a65319; border: 2px solid #ee9854; }
     .depth-calculate.is-complete:hover:not(:disabled) { background: #fff8f1; }
     .depth-warning { margin: 12px 0 0; color: #657d8d; line-height: 1.5; font-size: 11px; }
+    .depth-statistic-field { margin: 12px 0 16px; }
     .orientation-dialog { width: min(495px, 100%); }
     .orientation-preview { border: 1px solid #cbdfe8; background: #f7fbfc; padding: 8px; min-height: 250px; }
     .orientation-preview svg { display: block; width: 100%; height: auto; max-height: 390px; }
@@ -496,7 +497,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8</span>
+      <span>Version 1.8.1</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -660,7 +661,7 @@
                   <label for="swathDepthValue">Water depth (m)</label>
                   <div class="depth-input-row">
                     <input id="swathDepthValue" class="survey-parameter-input" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 30" aria-label="Water depth in metres">
-                    <button id="calculateDepthBtn" class="depth-calculator-button" type="button" title="Calculate mean depth from bathymetry" aria-label="Calculate mean depth from bathymetry" aria-haspopup="dialog" aria-controls="depthModal">▦</button>
+                    <button id="calculateDepthBtn" class="depth-calculator-button" type="button" title="Calculate depth from bathymetry" aria-label="Calculate depth from bathymetry" aria-haspopup="dialog" aria-controls="depthModal">▦</button>
                   </div>
                 </div>
                 <p class="survey-hint">Approximate flat-bottom swath: depth × (tan(port angle) + tan(starboard angle)). Angles are measured outward from vertical.</p>
@@ -747,19 +748,6 @@
           </div>
         </details>
       </div>
-      <details id="surveyExtraOptions" class="survey-accordion survey-accordion-extra">
-        <summary>Survey Method</summary>
-        <div class="survey-accordion-body">
-          <fieldset class="optimization-settings" aria-label="Survey line placement method">
-            <legend>Survey placement</legend>
-            <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="default" checked> Default</label>
-            <p class="optimization-description">Use the existing evenly spaced, centered survey line placement.</p>
-            <label class="optimization-choice"><input type="radio" name="surveyPlacement" value="optimized"> BathTub Optimized Survey</label>
-            <p class="optimization-description">Tests different starting offsets to find the lowest calculated survey time for your line spacing and orientation while checking simplified swath coverage; this does not optimize vessel routing.</p>
-            <p class="optimization-description optimization-caution" id="optimizationCaution" hidden>For manual spacing, the optimization assumes a usable swath equal to the specified line spacing; actual seafloor coverage must be verified.</p>
-          </fieldset>
-        </div>
-      </details>
       <p class="survey-error" id="surveyError" role="alert" hidden></p>
       <button type="button" id="drawSurveyLines" class="survey-draw">Draw Survey Lines</button>
     </section>
@@ -837,13 +825,21 @@
         <h2 id="depthDialogTitle">Calculate Depth from Bathymetry</h2>
         <button id="closeDepthModal" class="survey-close" type="button" aria-label="Close depth calculator">×</button>
       </div>
-      <p class="depth-description">Calculate the mean of valid bathymetry pixel values inside your selected survey-area polygon. This mean value is calculated from a bathymetry TIFF layer that you have added to the project in the Layers panel. Only pixel centres inside the polygon count; NoData and polygon holes are excluded. The raster must be marked Bathymetry in Layers.</p>
+      <p class="depth-description">Find the mean, deepest or shallowest water depth from the bathymetry GeoTIFF within the selected survey-area polygon. Only valid original raster pixels whose centres lie inside the polygon are used; NoData and holes are excluded. The raster must be marked Bathymetry in Imported Layers.</p>
       <div id="depthSource" class="depth-source" role="status"></div>
       <div id="depthPreview" class="orientation-preview calc-inline-preview" role="img" aria-label="Selected survey area preview"></div>
+      <div class="survey-field depth-statistic-field">
+        <label for="depthStatisticSelect">Depth value to use</label>
+        <select id="depthStatisticSelect" class="survey-area-select" aria-label="Choose bathymetry depth statistic">
+          <option value="mean" selected>Mean depth</option>
+          <option value="max">Maximum depth (deepest)</option>
+          <option value="min">Minimum depth (shallowest)</option>
+        </select>
+      </div>
       <button id="calculateDepthFromRaster" class="survey-draw depth-calculate" type="button">Calculate from bathymetry layer</button>
       <p id="depthResult" class="depth-result" role="status" aria-live="polite" hidden></p>
       <button id="applyCalculatedDepth" class="survey-draw depth-apply" type="button" hidden>Input water depth</button>
-      <p class="depth-warning">This is a pixel-centre mean, not an area-weighted or vertical-datum-corrected sounding.</p>
+      <p class="depth-warning">Statistics use original valid raster pixels (not an area-weighted or vertical-datum-corrected sounding). For signed elevation rasters, minimum and maximum water depths use absolute pixel values.</p>
     </section>
   </div>
 
@@ -1434,6 +1430,7 @@
     const records = new Map();
     const createdRecords = new Map();
     let nextCreatedId = 1;
+    let nextSurveyAreaOrder = 1;
     let nextId = 1;
     // Keeps its selection until that raster is removed or set back to "None".
     let selectedLegendId = null;
@@ -1484,6 +1481,7 @@
     const depthSourceEl = document.getElementById('depthSource');
     const depthPreviewEl = document.getElementById('depthPreview');
     const depthResultEl = document.getElementById('depthResult');
+    const depthStatisticSelectEl = document.getElementById('depthStatisticSelect');
     const calculateDepthFromRasterBtn = document.getElementById('calculateDepthFromRaster');
     const applyCalculatedDepthBtn = document.getElementById('applyCalculatedDepth');
     const calculationModal = document.getElementById('calculationModal');
@@ -1636,15 +1634,9 @@
       if (surveyTimeModeEl.value === 'manual') updateManualSurveyTimeStatus();
     }));
 
-    const surveyPlacementRadios = Array.from(document.querySelectorAll('input[name="surveyPlacement"]'));
-    const optimizationCautionEl = document.getElementById('optimizationCaution');
-    const currentSurveyPlacement = () => surveyPlacementRadios.find(radio => radio.checked)?.value || 'default';
-    function updateOptimizationCaution() {
-      optimizationCautionEl.hidden = currentSurveyPlacement() !== 'optimized' || lineSpacingModeEl.value !== 'manual';
-    }
-    surveyPlacementRadios.forEach(radio => radio.addEventListener('change', updateOptimizationCaution));
-    lineSpacingModeEl.addEventListener('change', updateOptimizationCaution);
-    updateOptimizationCaution();
+    // BathTub Optimized Survey is paused. Keep the existing default geometry
+    // path active until survey placement options are reintroduced.
+    const currentSurveyPlacement = () => 'default';
     const planStatsModal = document.getElementById('planStatsModal');
     const closePlanStatsModalBtn = document.getElementById('closePlanStatsModal');
     let activePlanStatsId = null;
@@ -1769,18 +1761,22 @@
     function updateSurveyAreaOptions() {
       const previous = surveyAreaSelect.value;
       surveyAreaSelect.replaceChildren(new Option('Select a shapefile or created polygon…', ''));
-      let count = 0;
+      const eligible = [];
       for (const [id, record] of records) {
         if (record.sourceFormat !== 'shapefile' || !record.hasSurveyPolygon) continue;
-        surveyAreaSelect.add(new Option(record.name, id)); count++;
+        eligible.push({ id, record, label: record.name });
       }
       for (const [id, record] of createdRecords) {
-        surveyAreaSelect.add(new Option(`${record.name} (created)`, id)); count++;
+        eligible.push({ id, record, label: `${record.name} (created)` });
       }
-      if (validSurveyArea(records.get(previous)) || validSurveyArea(createdRecords.get(previous))) surveyAreaSelect.value = previous;
-      else surveyAreaSelect.value = '';
-      surveyAreaSelect.disabled = count === 0;
-      surveyAreaHint.hidden = count > 0;
+      // The first eligible polygon uploaded or created is selected by default;
+      // an explicit user selection stays selected while that layer exists.
+      eligible.sort((a, b) => a.record.surveyAreaOrder - b.record.surveyAreaOrder);
+      for (const option of eligible) surveyAreaSelect.add(new Option(option.label, option.id));
+      if (eligible.some(option => option.id === previous)) surveyAreaSelect.value = previous;
+      else surveyAreaSelect.value = eligible.length ? eligible[0].id : '';
+      surveyAreaSelect.disabled = eligible.length === 0;
+      surveyAreaHint.hidden = eligible.length > 0;
     }
 
     // Only one TIFF may be tagged Bathymetry at any time. The most recently
@@ -1839,6 +1835,10 @@
       if (restoreFocus && !surveyModal.hidden) calculateDepthBtn.focus();
     }
     calculateDepthBtn.addEventListener('click', openDepthModal);
+    depthStatisticSelectEl.addEventListener('change', () => {
+      clearPendingCalculatedDepth();
+      depthResultEl.hidden = true;
+    });
     closeDepthModalBtn.addEventListener('click', () => closeDepthModal());
     applyCalculatedDepthBtn.addEventListener('click', () => {
       if (!(pendingCalculatedDepth > 0)) return;
@@ -2046,6 +2046,7 @@
       const nodata = georaster.noDataValue == null || georaster.noDataValue === ''
         ? null : Number(georaster.noDataValue);
       let sum = 0, count = 0, candidates = 0;
+      let minimumDepth = Infinity, maximumDepth = -Infinity;
       for (let row = top; row <= bottom; row++) {
         const scan = rows[row];
         for (let col = left; col <= right; col++) {
@@ -2054,6 +2055,9 @@
           const raw = scan[col];
           if (!isValidPixel(raw, nodata)) continue;
           sum += raw;
+          const waterDepth = Math.abs(raw);
+          minimumDepth = Math.min(minimumDepth, waterDepth);
+          maximumDepth = Math.max(maximumDepth, waterDepth);
           count++;
         }
         // Yield occasionally so the calculating state has a chance to render.
@@ -2062,7 +2066,7 @@
       if (!count) throw new Error(candidates ? 'There are no valid bathymetry pixels inside the survey polygon (check NoData).' : 'No raster pixel centres fall inside the survey polygon. Check alignment and resolution.');
       const mean = sum / count;
       if (!Number.isFinite(mean)) throw new Error('Unable to calculate a valid mean from this TIFF.');
-      return { mean, count, invalid: candidates - count };
+      return { mean, minimumDepth, maximumDepth, count, invalid: candidates - count };
     }
     // Each 3x3 zone is defined in the local metric map bounding box, not in
     // TIFF rows/columns. This gives nine equal geographic-size analysis cells
@@ -2605,6 +2609,7 @@
       if (!active || !validSurveyArea(area)) { updateDepthSource(); return; }
       const selectedRasterId = active.id;
       const selectedAreaId = surveyAreaSelect.value;
+      const chosenStatistic = depthStatisticSelectEl.value;
       calculateDepthFromRasterBtn.disabled = true;
       depthResultEl.hidden = true;
       clearPendingCalculatedDepth();
@@ -2619,13 +2624,19 @@
         if (activeBathymetryLayer()?.id !== selectedRasterId || surveyAreaSelect.value !== selectedAreaId) {
           throw new Error('The selected layers changed during calculation. Please retry.');
         }
-        const depth = Math.abs(stats.mean);
-        if (!(depth > 0)) throw new Error('Mean depth is zero; please check the TIFF values and vertical reference.');
+        if (depthStatisticSelectEl.value !== chosenStatistic) {
+          throw new Error('Depth statistic changed during calculation. Please recalculate.');
+        }
+        const depth = chosenStatistic === 'max' ? stats.maximumDepth
+          : chosenStatistic === 'min' ? stats.minimumDepth : Math.abs(stats.mean);
+        if (!(depth > 0)) throw new Error('Selected depth is zero; please check the TIFF values and vertical reference.');
+        const label = chosenStatistic === 'max' ? 'Maximum (deepest)'
+          : chosenStatistic === 'min' ? 'Minimum (shallowest)' : 'Mean';
         pendingCalculatedDepth = depth;
         applyCalculatedDepthBtn.textContent = `Input water depth (${depth.toFixed(3)} m)`;
         applyCalculatedDepthBtn.hidden = false;
         calculateDepthFromRasterBtn.classList.add('is-complete');
-        showDepthResult(`Mean raster value: ${stats.mean.toFixed(3)} m. Calculated water depth: ${depth.toFixed(3)} m from ${stats.count.toLocaleString()} valid cell centres.${stats.invalid ? ` ${stats.invalid.toLocaleString()} NoData/invalid cells excluded.` : ''}`);
+        showDepthResult(`${label} water depth: ${depth.toFixed(3)} m from ${stats.count.toLocaleString()} valid cell centres.${chosenStatistic === 'mean' ? ` Signed raster mean: ${stats.mean.toFixed(3)} m.` : ''}${stats.invalid ? ` ${stats.invalid.toLocaleString()} NoData/invalid cells excluded.` : ''}`);
       } catch (error) {
         showDepthResult(error.message || 'Bathymetry mean calculation failed.', true);
       } finally {
@@ -3169,7 +3180,6 @@
      starboardBeamAngleValueEl, swathOverlapValueEl, document.getElementById('lineOrientationValue'),
      surveySpeedValueEl, turnTimeValueEl, surveyOvershootEl].forEach(el =>
       el.addEventListener('input', scheduleSurveyTimeEstimate));
-    surveyPlacementRadios.forEach(el => el.addEventListener('change', scheduleSurveyTimeEstimate));
     updateSurveyTimeMode();
 
     function updatePlannedEmpty() { plannedEmpty.hidden = plannedRecords.size > 0; }
@@ -5260,7 +5270,7 @@
       const layer = L.geoJSON(sourceData, { pane: 'createdPane', style: { color: '#187ba4', weight: 2.5, fillColor: '#40a0c3', fillOpacity: .16 } });
       const bounds = layer.getBounds();
       if (!validBounds(bounds)) throw new Error('Shape coordinates are outside valid WGS84 limits.');
-      const rec = { id, name, layer, bounds, sourceFormat: 'created', sourceData };
+      const rec = { id, name, layer, bounds, sourceFormat: 'created', sourceData, surveyAreaOrder: nextSurveyAreaOrder++ };
       createdRecords.set(id, rec);
       layer.addTo(map);
       const item = document.createElement('div');
@@ -5365,8 +5375,9 @@
 
     function registerLayer(name, kind, layer, bounds, rasterConfig = null, visible = true, sourceFormat = null, sourceData = null) {
       const id = String(nextId++);
+      const hasSurveyPolygon = sourceFormat === 'shapefile' && hasSurveyPolygonGeometry(sourceData);
       records.set(id, { name, kind, layer, bounds, rasterConfig, sourceFormat, sourceData,
-        hasSurveyPolygon: sourceFormat === 'shapefile' && hasSurveyPolygonGeometry(sourceData) });
+        hasSurveyPolygon, surveyAreaOrder: hasSurveyPolygon ? nextSurveyAreaOrder++ : null });
       if (visible) layer.addTo(map);
       const item = document.createElement('div');
       item.className = 'layer';
