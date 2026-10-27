@@ -458,6 +458,10 @@
     .parallel-line-field .survey-parameter-select { width: 100%; }
     .parallel-line-error { margin-top: 16px; }
     .parallel-line-dialog .survey-draw { margin-top: 23px; }
+    .survey-line-context .delete-line-action { color: #a6332a; }
+    .survey-line-context .delete-line-action:hover, .survey-line-context .delete-line-action:focus-visible { background: #fff1ed; }
+    .length-line-dialog { width: min(440px,100%); }
+    .length-line-dialog .survey-draw { margin-top: 23px; }
 
   
     /* Crossline planner uses the same squared, clean BathTub controls. */
@@ -500,7 +504,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.4</span>
+      <span>Version 1.8.5</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -1032,6 +1036,8 @@
   <!-- Right-click menu is positioned beside the map cursor, like SIS. -->
   <div id="surveyLineContextMenu" class="survey-line-context" role="menu" aria-label="Survey line actions" hidden>
     <button id="surveyLineAddParallelMenu" type="button" role="menuitem">Add parallel line</button>
+    <button id="surveyLineIncreaseLengthMenu" type="button" role="menuitem">Increase length</button>
+    <button id="surveyLineDeleteMenu" class="delete-line-action" type="button" role="menuitem">Delete line</button>
   </div>
 
   <div class="survey-modal-backdrop" id="parallelLineModal" hidden>
@@ -1055,6 +1061,30 @@
       </div>
       <p id="parallelLineError" class="survey-error parallel-line-error" role="alert" hidden></p>
       <button id="confirmParallelLine" class="survey-draw" type="button">Add parallel line</button>
+    </section>
+  </div>
+
+  <div class="survey-modal-backdrop" id="increaseLineLengthModal" hidden>
+    <section class="survey-dialog parallel-line-dialog length-line-dialog" role="dialog" aria-modal="true" aria-labelledby="increaseLineLengthTitle">
+      <div class="survey-dialog-head">
+        <h2 id="increaseLineLengthTitle">Increase Line Length</h2>
+        <button id="closeIncreaseLineLengthModal" class="survey-close" type="button" aria-label="Close Increase Line Length">×</button>
+      </div>
+      <p id="increaseLineLengthSource" class="parallel-line-source"></p>
+      <div class="parallel-line-field">
+        <label for="increaseLineLengthMeters">Increase length by (m)</label>
+        <div class="survey-input-unit">
+          <input id="increaseLineLengthMeters" class="survey-parameter-input" type="number" min="0.001" max="100000" step="any" inputmode="decimal" placeholder="Enter additional length" required>
+          <span>m</span>
+        </div>
+      </div>
+      <div class="parallel-line-field">
+        <label for="increaseLineLengthDirection">Direction of extension</label>
+        <select id="increaseLineLengthDirection" class="survey-parameter-select"></select>
+        <p class="survey-hint">Evenly adds half the entered distance to each end. A bearing option extends only the corresponding end.</p>
+      </div>
+      <p id="increaseLineLengthError" class="survey-error" role="alert" hidden></p>
+      <button id="confirmIncreaseLineLength" class="survey-draw" type="button">Increase length</button>
     </section>
   </div>
 
@@ -3276,6 +3306,16 @@
     // line shape, its survey length, and any overshoot beyond the polygon.
     const surveyLineContextMenu = document.getElementById('surveyLineContextMenu');
     const surveyLineAddParallelMenuBtn = document.getElementById('surveyLineAddParallelMenu');
+    const surveyLineIncreaseLengthMenuBtn = document.getElementById('surveyLineIncreaseLengthMenu');
+    const surveyLineDeleteMenuBtn = document.getElementById('surveyLineDeleteMenu');
+    const increaseLineLengthModal = document.getElementById('increaseLineLengthModal');
+    const increaseLineLengthSourceEl = document.getElementById('increaseLineLengthSource');
+    const increaseLineLengthMetersEl = document.getElementById('increaseLineLengthMeters');
+    const increaseLineLengthDirectionEl = document.getElementById('increaseLineLengthDirection');
+    const increaseLineLengthErrorEl = document.getElementById('increaseLineLengthError');
+    const confirmIncreaseLineLengthBtn = document.getElementById('confirmIncreaseLineLength');
+    const closeIncreaseLineLengthModalBtn = document.getElementById('closeIncreaseLineLengthModal');
+    let activeIncreaseLineLength = null;
     const parallelLineModal = document.getElementById('parallelLineModal');
     const parallelLineSourceEl = document.getElementById('parallelLineSource');
     const parallelLineSpacingEl = document.getElementById('parallelLineSpacing');
@@ -3309,7 +3349,7 @@
     }
 
     function openSurveyLineContextMenu(planId, lineId, event) {
-      if (drawing || rulerActive || !parallelLineModal.hidden) return;
+      if (drawing || rulerActive || !parallelLineModal.hidden || !increaseLineLengthModal.hidden) return;
       const record = plannedRecords.get(planId), line = record?.lines.get(lineId);
       if (!record || !line) return;
       const original = event.originalEvent;
@@ -3320,7 +3360,7 @@
       const clientX = original?.clientX ?? map.latLngToContainerPoint(event.latlng).x + map.getContainer().getBoundingClientRect().left;
       const clientY = original?.clientY ?? map.latLngToContainerPoint(event.latlng).y + map.getContainer().getBoundingClientRect().top;
       const width = surveyLineContextMenu.offsetWidth || 186;
-      const height = surveyLineContextMenu.offsetHeight || 46;
+      const height = surveyLineContextMenu.offsetHeight || 132;
       surveyLineContextMenu.style.left = `${Math.max(5, Math.min(clientX, window.innerWidth - width - 6))}px`;
       surveyLineContextMenu.style.top = `${Math.max(5, Math.min(clientY, window.innerHeight - height - 6))}px`;
       surveyLineAddParallelMenuBtn.focus();
@@ -3443,6 +3483,126 @@
         else if (!event.shiftKey && document.activeElement===last) {event.preventDefault();first.focus();}
       }
     });
+    // Length edits use the line's metre-based local survey CRS. Bearing labels
+    // are true-north bearings at each endpoint, matching BathTub's ruler.
+    function lengthExtensionGeometry(record, line) {
+      const geometry = getParallelLineGeometry(record, line);
+      const {points, projection} = geometry;
+      const first = points[0], second = points[1];
+      const last = points[points.length-1], penultimate = points[points.length-2];
+      const directionOut = (p,q) => {
+        const dx=p[0]-q[0], dy=p[1]-q[1];
+        const mag=Math.hypot(dx,dy);
+        if (!(mag>0.001)) throw new Error('Line endpoint is too short to extend.');
+        return [dx/mag,dy/mag];
+      };
+      const firstOut=directionOut(first,second), lastOut=directionOut(last,penultimate);
+      const trueBearing=(origin,unit) => {
+        const [lon0,lat0]=projection.inverse(origin);
+        const [lon1,lat1]=projection.inverse([origin[0]+unit[0]*100,origin[1]+unit[1]*100]);
+        const result=rulerLineBearing({lat:lat0,lng:lon0},{lat:lat1,lng:lon1});
+        if(result===null) throw new Error('Unable to determine the end bearing.');
+        return Math.round(result)%360;
+      };
+      return {...geometry, firstOut, lastOut,
+        firstBearing:trueBearing(first,firstOut),lastBearing:trueBearing(last,lastOut)};
+    }
+    function openIncreaseLineLengthModal() {
+      const source=activeSurveyLineMenu;
+      hideSurveyLineContextMenu();
+      const record=plannedRecords.get(source?.planId);
+      const line=record?.lines.get(source?.lineId);
+      if(!line) return;
+      try {
+        const details=lengthExtensionGeometry(record,line);
+        activeIncreaseLineLength={planId:record.id,lineId:line.id};
+        increaseLineLengthSourceEl.textContent=`${record.name} · ${line.name} · ${line.lengthMeters.toFixed(1)} m`;
+        increaseLineLengthMetersEl.value='';
+        increaseLineLengthDirectionEl.replaceChildren(
+          new Option('Evenly (both ends)','even'),
+          new Option(`Towards ${details.firstBearing}° (first end)`,'first'),
+          new Option(`Towards ${details.lastBearing}° (last end)`,'last')
+        );
+        increaseLineLengthErrorEl.hidden=true;
+        increaseLineLengthModal.hidden=false;
+        document.body.style.overflow='hidden';
+        increaseLineLengthMetersEl.focus();
+      } catch(error){setStatus(error.message || 'Unable to edit survey line length.',true);}
+    }
+    function closeIncreaseLineLengthModal() {
+      if(increaseLineLengthModal.hidden) return;
+      increaseLineLengthModal.hidden=true;
+      activeIncreaseLineLength=null;
+      document.body.style.overflow='';
+      map.getContainer().focus?.();
+    }
+    function extendSurveyLine(record,line,addedMeters,extensionMode) {
+      if(!Number.isFinite(addedMeters)||addedMeters<=0||addedMeters>100000)
+        throw new Error('Enter an additional length greater than 0 and no more than 100,000 m.');
+      if(!['even','first','last'].includes(extensionMode))
+        throw new Error('Choose how the extra length should be distributed.');
+      const details=lengthExtensionGeometry(record,line);
+      const {points,projection,firstOut,lastOut}=details;
+      const extended=points.map(p=>p.slice());
+      const startMetres=extensionMode==='last'?0:extensionMode==='even'?addedMeters/2:addedMeters;
+      const endMetres=extensionMode==='first'?0:extensionMode==='even'?addedMeters/2:addedMeters;
+      extended[0]=[points[0][0]+firstOut[0]*startMetres,points[0][1]+firstOut[1]*startMetres];
+      const lastIndex=points.length-1;
+      extended[lastIndex]=[points[lastIndex][0]+lastOut[0]*endMetres,points[lastIndex][1]+lastOut[1]*endMetres];
+      const lnglats=extended.map(p=>projection.inverse(p));
+      if(lnglats.some(p=>!p.every(Number.isFinite)||Math.abs(p[0])>180||Math.abs(p[1])>90))
+        throw new Error('The extended line is outside the valid map coordinates.');
+      // Update the existing Leaflet layer to retain click/contextmenu handlers,
+      // selection, plan membership, and export from its current geometry.
+      line.layer.setLatLngs(lnglats.map(([lon,lat])=>[lat,lon]));
+      line.lengthMeters+=addedMeters;
+      if(line.layer.feature?.properties) line.layer.feature.properties.length_m=line.lengthMeters;
+      line.row.querySelector('.planned-line-length').textContent=`${Math.round(line.lengthMeters)} m`;
+      record.bounds=record.layer.getBounds();
+      if(record.coverageLayerId) removeRegisteredLayer(record.coverageLayerId);
+      record.coverageLayerId=null;
+      record.coverage=null;
+      refreshPlanSummary(record);
+      refreshPlanSelection(record);
+      if(line.selected && map.hasLayer(record.layer)) line.layer.bringToFront();
+    }
+    surveyLineIncreaseLengthMenuBtn.addEventListener('click',openIncreaseLineLengthModal);
+    surveyLineDeleteMenuBtn.addEventListener('click',()=>{
+      const target=activeSurveyLineMenu;
+      hideSurveyLineContextMenu();
+      const record=plannedRecords.get(target?.planId);
+      if(!record?.lines.has(target?.lineId)) return;
+      removeSelectedSurveyLines(record,[target.lineId]);
+    });
+    confirmIncreaseLineLengthBtn.addEventListener('click',()=>{
+      const record=plannedRecords.get(activeIncreaseLineLength?.planId);
+      const line=record?.lines.get(activeIncreaseLineLength?.lineId);
+      if(!line) {closeIncreaseLineLengthModal();return;}
+      try {
+        extendSurveyLine(record,line,Number(increaseLineLengthMetersEl.value),increaseLineLengthDirectionEl.value);
+        closeIncreaseLineLengthModal();
+      } catch(error){
+        increaseLineLengthErrorEl.textContent=error.message||'Unable to increase line length.';
+        increaseLineLengthErrorEl.hidden=false;
+      }
+    });
+    closeIncreaseLineLengthModalBtn.addEventListener('click',closeIncreaseLineLengthModal);
+    increaseLineLengthModal.addEventListener('click',event=>{
+      if(event.target===increaseLineLengthModal) closeIncreaseLineLengthModal();
+    });
+    increaseLineLengthModal.addEventListener('keydown',event=>{
+      if(event.key==='Escape') {event.preventDefault();event.stopPropagation();closeIncreaseLineLengthModal();}
+      else if(event.key==='Enter' && event.target!==closeIncreaseLineLengthModalBtn){
+        event.preventDefault();confirmIncreaseLineLengthBtn.click();
+      } else if(event.key==='Tab'){
+        const controls=[closeIncreaseLineLengthModalBtn,increaseLineLengthMetersEl,
+          increaseLineLengthDirectionEl,confirmIncreaseLineLengthBtn];
+        const first=controls[0],last=controls.at(-1);
+        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+      }
+    });
+
     document.addEventListener('pointerdown',event=>{
       if (!surveyLineContextMenu.hidden && !surveyLineContextMenu.contains(event.target)) hideSurveyLineContextMenu();
     });
@@ -3458,6 +3618,7 @@
       if (!record) return;
       if (activePlanStatsId === id) closePlanStatsModal();
       if (activeParallelLine?.planId === id) closeParallelLineModal();
+      if (activeIncreaseLineLength?.planId === id) closeIncreaseLineLengthModal();
       if (activeSurveyLineMenu?.planId === id) hideSurveyLineContextMenu();
       map.removeLayer(record.layer);
       record.element.remove();
@@ -3465,9 +3626,11 @@
       updatePlannedEmpty();
     }
 
-    function removeSelectedSurveyLines(record) {
+    function removeSelectedSurveyLines(record, explicitIds = null) {
+      const ids = explicitIds ? new Set(explicitIds) : null;
       for (const [id, line] of record.lines) {
-        if (!line.selected) continue;
+        if (ids ? !ids.has(id) : !line.selected) continue;
+        if (activeIncreaseLineLength?.planId===record.id && activeIncreaseLineLength?.lineId===id) closeIncreaseLineLengthModal();
         if (activeSurveyLineMenu?.planId===record.id && activeSurveyLineMenu?.lineId===id) hideSurveyLineContextMenu();
         record.layer.removeLayer(line.layer);
         line.row.remove();
