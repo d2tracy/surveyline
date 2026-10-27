@@ -136,6 +136,7 @@
     .optimization-description { color: #597788; font-size: 12px; line-height: 1.4; margin: 5px 0 13px 23px; }
     .optimization-caution { color: #925217; margin-bottom: 4px; }
     .optimization-caution[hidden] { display: none; }
+    #crosslinePlannerStatus[hidden] { display: none; }
     .coverage-tool-action { margin-top: 11px; }
     #coverageLayersTitle { font-size: 16px; }
     #clearCoverages { white-space: nowrap; }
@@ -497,7 +498,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.1</span>
+      <span>Version 1.8.2</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -664,7 +665,6 @@
                     <button id="calculateDepthBtn" class="depth-calculator-button" type="button" title="Calculate depth from bathymetry" aria-label="Calculate depth from bathymetry" aria-haspopup="dialog" aria-controls="depthModal">▦</button>
                   </div>
                 </div>
-                <p class="survey-hint">Approximate flat-bottom swath: depth × (tan(port angle) + tan(starboard angle)). Angles are measured outward from vertical.</p>
               </div>
               <div class="survey-field">
                 <label for="swathOverlapValue">Swath overlap</label>
@@ -738,12 +738,12 @@
                 <input id="surveyOvershootValue" class="survey-parameter-input" type="number" min="0" max="10000" step="any" inputmode="decimal" value="0" aria-describedby="surveyOvershootHint" aria-label="Extend survey lines beyond the polygon at each end, in metres">
                 <span aria-hidden="true">m</span>
               </div>
-              <p id="surveyOvershootHint" class="optimization-description">Extend both ends of each planned line beyond the survey-area boundary. Default: 0 m. Check obstacles, exclusion zones and safe turning room before operating outside the polygon.</p>
+              <p id="surveyOvershootHint" class="optimization-description">Extend both ends of each planned line beyond the survey-area boundary.</p>
             </div>
             <div class="survey-field">
               <label>Crossline planner</label>
               <button id="openCrosslinePlanner" type="button" class="orientation-outline-button crossline-open" aria-haspopup="dialog" aria-controls="crosslinePlannerModal">Open Crossline Planner</button>
-              <p id="crosslinePlannerStatus" class="optimization-description">Optional: place one crossline perpendicular to the main survey lines.</p>
+              <p id="crosslinePlannerStatus" class="optimization-description" hidden></p>
             </div>
           </div>
         </details>
@@ -4092,7 +4092,8 @@
       crosslineStatusEl.textContent = hasMatchingCrossline(surveyAreaSelect.value,bearing)
         ? `Crossline set · ${savedCrossline.manualBearing ? 'custom bearing' : savedCrossline.mode === 'side' ? 'parallel to selected shape side' : 'perpendicular to survey lines'} · ${savedCrossline.orientation.toFixed(1)}° · ${savedCrossline.overshoot} m overshoot per end. Open planner to edit.`
         : savedCrossline ? 'Survey area or line orientation changed. Reopen planner to set a new crossline.'
-        : 'Optional: place one crossline perpendicular to the main survey lines.';
+        : '';
+      crosslineStatusEl.hidden = !crosslineStatusEl.textContent;
     }
     function crosslinePreviewMarkup(draft) {
       const all = draft.context.shaped.flat(2);
