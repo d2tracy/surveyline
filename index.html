@@ -500,7 +500,7 @@
       <span class="header-credit">Created by Declan Tracy</span>
     </div>
     <div class="header-actions">
-      <span>Version 1.8.3</span>
+      <span>Version 1.8.4</span>
     </div>
   </header>
   <div class="shell" id="appShell">
@@ -605,6 +605,17 @@
         <p id="shapeMethodInstructions" class="shape-method-instructions">Click the map to place polygon corners. Use at least three points, then right-click to finish. Press Esc to cancel.</p>
       </div>
       <button id="beginShapeDrawing" class="survey-draw shape-draw-btn" type="button">Draw Shape</button>
+    </section>
+  </div>
+
+  <!-- Plan Survey is available only when at least one polygon survey area exists. -->
+  <div class="survey-modal-backdrop" id="noShapefileModal" hidden>
+    <section class="survey-dialog" role="alertdialog" aria-modal="true" aria-labelledby="noShapefileTitle" aria-describedby="noShapefileMessage">
+      <div class="survey-dialog-head">
+        <h2 id="noShapefileTitle">No shapefile found</h2>
+      </div>
+      <p id="noShapefileMessage" class="depth-description">Upload or create a shape to plan a survey</p>
+      <button id="acknowledgeNoShapefile" class="survey-draw" type="button">OK</button>
     </section>
   </div>
 
@@ -2648,14 +2659,47 @@
       }
     });
 
+    const noShapefileModal = document.getElementById('noShapefileModal');
+    const acknowledgeNoShapefileBtn = document.getElementById('acknowledgeNoShapefile');
+    function openNoShapefileWarning() {
+      noShapefileModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      acknowledgeNoShapefileBtn.focus();
+    }
+    function closeNoShapefileWarning() {
+      if (noShapefileModal.hidden) return;
+      noShapefileModal.hidden = true;
+      document.body.style.overflow = '';
+      planSurveyBtn.focus();
+    }
+    acknowledgeNoShapefileBtn.addEventListener('click', closeNoShapefileWarning);
+    noShapefileModal.addEventListener('click', event => {
+      if (event.target === noShapefileModal) closeNoShapefileWarning();
+    });
+    noShapefileModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeNoShapefileWarning();
+      } else if (event.key === 'Tab') {
+        event.preventDefault();
+        acknowledgeNoShapefileBtn.focus();
+      }
+    });
     function openSurveyModal() {
       updateSurveyAreaOptions();
+      // No uploaded or hand-created polygon: explain what is missing rather
+      // than allowing users into a Plan Survey dialog with an empty selector.
+      if (!validSurveyArea(selectedSurveyAreaRecord())) {
+        openNoShapefileWarning();
+        return;
+      }
       updateSpacingMode();
       updateSurveyTimeMode();
       surveyErrorEl.hidden = true;
       surveyModal.hidden = false;
       document.body.style.overflow = 'hidden';
-      (surveyAreaSelect.disabled ? closeSurveyModalBtn : surveyAreaSelect).focus();
+      surveyAreaSelect.focus();
     }
     function closeSurveyModal() {
       if (surveyModal.hidden) return;
